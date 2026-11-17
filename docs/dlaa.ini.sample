@@ -107,6 +107,11 @@ log_level = 1
 # More GPU saving, blockier edges. Best with eye tracking (vrs_eye), where you never look at the outer ring.
 # The menu's Foveated strength row.
 # vrs_strength = 0
+
+# Phase 112c FOVEATED PRESET: recommended | custom. Menu row Foveated preset (VR, Performance group). recommended = vrs_inner /
+# vrs_outer / vrs_passes / vrs_strength at their defaults (55 / 80 / 0 / 0); custom = your own (the Foveated size, Foveated:
+# lighting too and Foveated strength rows are shown only then). No line = picked from those values. vrs and vrs_eye are not in it.
+# vrs_preset = recommended
 # EYE-TRACKED FOVEATION (experimental), 0 / 1, default 0. 1 = the sharp centre follows where you look, on a headset
 # with eye tracking that the VR runtime reports through OpenXR (XR_EXT_eye_gaze_interaction, for example Varjo);
 # without one it stays at the lens centre. The mod asks the runtime for eye gaze when the game starts, if this or vrs is on; so
@@ -160,24 +165,78 @@ log_level = 1
 # every frame (at most 1 px at the right / bottom edge).
 # jitter_overscan = 1
 
+# Phase 112 PICTURE PRESET (112c: was "Picture fixes" / picture_fixes, "standard" -- both still read): one switch for every
+# fix the mod adds against flicker, trails and shimmer (the keys below marked "a Picture fix": dlss_bias_mask, shadow_lock,
+# pole_aa, dlaa_mv_dilate, mv_fwd_conservative, wire_widen, power_line_fix, pixel_reader_fix, light_redraw_jitter,
+# light_fs_jitter, water_overscan_fix, outside_aa, cutout_mips, mv_fwd_depth).
+#   recommended = every tested fix at its default (pole_aa and wire_widen are test features: off in recommended; cutout_mips is
+#                 on since 112c; mv_fwd_depth = the Quality preset's: high / medium 1, low 0)
+#   off         = every one of them off, LIVE (compare; the DLAA / DLSS itself stays on -- that is mode). Phase 112r: except
+#                 dlaa_mv_dilate (Wire fix: motion), which off leaves as it is: switching it rebuilds every DLSS feature (a
+#                 46 - 100+ ms hitch and a history reset); change it in custom. cutout_mips: off sets the setting, the running
+#                 textures follow at the next start.
+#   custom      = your own value per fix (the menu shows each fix row; a hand change of one fix makes it custom by itself)
+# Menu row "Picture preset" (Picture group); key_picture_preset (Ctrl+Shift+F7) switches recommended <-> off (from custom: off,
+# then back to the same custom values). No line = recommended when every fix key here matches it, else custom (an old dlaa.ini
+# keeps its values). Save writes picture_preset (and removes an old picture_fixes line), and the fix keys only with custom
+# (recommended / off over recommended remove them: the preset carries them). Reset = recommended.
+# picture_preset = recommended
+
 # Phase 55: the game's lighting pass draws some meshes a second time (sunlight through a tent canopy, emissive surfaces) and
 # lights them only where that redraw matches the G-buffer depth. 1 = default: those redraws (depth test GREATER_EQUAL / EQUAL
 # without depth write, with a depth bias) get the same jittered viewport as the G-buffer, so they match on every jitter phase.
 # 0 = the game's own viewport for the whole lighting pass (before phase 55): such lit areas switch off on some frames (flicker).
+# Phase 112: a Picture fix -- live from the menu (row shown with picture_preset = custom); with recommended / off the preset sets it.
 # light_redraw_jitter = 1
 
 # Phase 78: the lighting pass's FULL-SCREEN draws (the deferred sunlight) rebuild each pixel's position from its unshifted
 # screen position, but the G-buffer texel there was drawn with the jitter. On surfaces seen at a grazing angle (a shed roof in
 # a shadow's soft edge) that moves the shadow lookup each jitter phase: a dark flicker. 1 = default: those draws get the
 # G-buffer's jitter shift (at the game's size; the far column / row a negative shift misses is drawn again unshifted).
-# 0 = the game's own viewport for them (before phase 78). Startup only.
+# 0 = the game's own viewport for them (before phase 78). A Picture fix (phase 112: live).
 # light_fs_jitter = 1
 
 # Phase 97: the new SCS water (Iceland DLC and later) stores its surface and its bed on a checkerboard and finds its cell from
 # the interpolated screen position, which the 1 px larger jitter viewport (jitter_overscan) moves off the pixel: the water
 # vanished in big blocks that moved with the jitter. 1 = default: those water draws get the jitter shift at the game's size
-# (the far column / row a negative shift misses is drawn again unshifted). 0 = the overscan viewport for them too. Startup only.
+# (the far column / row a negative shift misses is drawn again unshifted). 0 = the overscan viewport for them too. A Picture fix (phase 112: live).
 # water_overscan_fix = 1
+
+# Phase 109a: forward draws that read their lighting / G-buffer texel at the interpolated screen position (road and water decals,
+# lane markings, the long wires, the old SCS water) read the NEIGHBOUR's texel under the 1 px larger jitter viewport on about half
+# of the jitter phases (thin lit edges change colour each frame). 1 = default: each such shader gets a twin that reads at its own
+# pixel (one operand of the game's bytecode patched; identical otherwise), used for its draws under that viewport. 0 = off. A Picture fix (112: live; on
+# again after a start in custom with it off needs a restart: its twins are made when the game creates its shaders).
+# pixel_reader_fix = 1
+
+# Phase 109b: the power lines the game widens itself (~1 px, see-through) go into the forward depth without alpha-to-coverage, so
+# every pixel of the line gets its depth / motion (with it, far lines had none: smear and dashes while driving). 1 = default, 0 = off.
+# A Picture fix (phase 112: live).
+# power_line_fix = 1
+
+# Phase 109d: Thin pole fix (test feature, default 0). The ETS2 red / white road poles break into dashes far away; 1 = their
+# thinnest faces are drawn as a faint even band pole_min_px wide, each face keeping its own share of the band (no overlap), so the
+# pole keeps its real width over the frames. Independent of wire_widen. Menu row "Thin pole fix" (Picture) and key_pole_aa switch
+# it live; Shift+F12 / Save writes it, Reset sets it back to 0. pole_min_px = the band width (1.0 .. 4.0, default 1.0, startup only; 1.5 before phase 113).
+# Phase 112: a Picture fix -- live from the menu (row shown with picture_preset = custom); with recommended / off the preset sets it. Not in recommended yet: moves in after a flat + VR test.
+# pole_aa = 0
+# pole_min_px = 1.0
+
+# Phase 108: the shader census. While you drive, the mod lists the shaders / draws it does not handle yet that are likely to
+# flicker (pixel-readers, cut-outs without the phase-77 mips, thin geometry, water-like shaders, known shaders with an unknown
+# vertex shader) in dlaa_census.txt next to dlaa_inject.log (every 60 s and ~5 s after a new suspect) and tints them live.
+# Phase 110: census = the tuning menu's "Show unfixed shaders" row (group Bug report) = key_census_view (Ctrl+Shift+F5): LIVE, no
+# restart, no ini edit; the row's Save writes census, Reset removes it; census = 1 here = on from the game's start. Off costs one
+# flag test per draw. While it is on, the capture key pressed twice (or Capture now) also puts EVERY suspect drawn right after
+# the key into the bug report: <capture>\census\ (index.txt, tinted.png, dlaa_census.txt, and per pair <vs>_<ps>\ its shaders +
+# disassembly, textures (DDS), constant buffers, draw state, input layout, coverage and a picture of it alone tinted) -- in the
+# _main zip. key_census_mark (Ctrl+Shift+F6) writes a MARK with the suspects on screen + a picture. census_dump = 1 (default 0,
+# startup only; needs the census on): the first time a suspect is seen, its dump goes into dlaa_census\<vs>_<ps>\ (one every 2 s,
+# at most 200, written off the render thread). census_max_mb = the disk budget of all census dumps per session (16..4096, default
+# 500; the capture's census part counts too). Startup only.
+# census = 0
+# census_dump = 0
+# census_max_mb = 500
 
 # Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
 # mv_enabled = 1
@@ -388,7 +447,7 @@ log_level = 1
 # the scene's own depth into it, so see-through parts hidden behind buildings / trucks are skipped by the GPU (same result,
 # less work; default), 0 = it starts empty (every hidden part is drawn too)
 # mv_fwd_depth_cull = 1
-# VR only: when mv_fwd_depth is NOT set in this file and the see-through depth costs more than this many ms per eye (measured
+# VR only: when mv_fwd_depth is NOT set in this file (nor by Ctrl+F3 / its row, nor a custom Picture preset) and the see-through depth costs more than this many ms per eye (measured
 # over 300 frames), it switches itself off for the session (one log line; Ctrl+F3 brings it back). 0 = never
 # mv_fwd_depth_budget_ms = 0.30
 # how many parts without a motion of their own (licence plates, ...) the "which vehicle does this sit on" search looks at per
@@ -482,6 +541,9 @@ log_level = 1
 # Save writes it (issue #26: before, the row's choice was lost at the next start)
 # v0.9.0 r11: only a depth inside the world range counts (a rain / dirt / glare layer on the windscreen used to make the
 # road and trees behind the glass move like the cabin)
+# Phase 112c: a Picture fix -- its recommended value is the Quality preset's (perf_profile high / medium 1, low 0); the row
+# (shown with picture_preset = custom) or Ctrl+F3 makes the preset custom. Phase 112r: a line written here (or the key / row) is
+# YOUR setting with any preset: the VR budget never switches it off and Save keeps the line (112c dropped it with recommended).
 # mv_fwd_depth = 1
 
 # phase 60: DLSS's own motion-vector dilation in DLAA mode (the NGX flag MVLowRes). With it DLSS gives the pixels next to a
@@ -489,6 +551,7 @@ log_level = 1
 # history while driving and does not break into flickering dashes. DLSS upscaling always uses it; before phase 60 DLAA did
 # not. 1 = on (default), 0 = off (the v0.13 behaviour). key_mv_dilate (Alt+F10) switches it live (the DLAA features are
 # recreated: a short history reset, like a model change).
+# Phase 112: a Picture fix -- live from the menu (row shown with picture_preset = custom); with recommended / off the preset sets it.
 # dlaa_mv_dilate = 1
 
 # phase 60: the forward-depth re-draw (mv_fwd_depth) through CONSERVATIVE rasterization: every pixel a wire / cable touches,
@@ -500,6 +563,7 @@ log_level = 1
 # (alpha-to-coverage), 2 = on WITHOUT that alpha test: every touched pixel (try it if 1 is not enough; glass / smoke then own
 # their whole area). key_mv_conservative (Alt+F11) cycles 1 -> 2 -> 0 live (mode 1: one high beep, mode 2: two
 # high beeps, off: one low beep); Shift+F12 saves the value.
+# Phase 112: a Picture fix -- live from the menu (row shown with picture_preset = custom); with recommended / off the preset sets it.
 # mv_fwd_conservative = 1
 
 # EXPERIMENTAL, off by default: in the tests so far it gave no clear gain while driving (far wires thinner than a pixel
@@ -516,6 +580,8 @@ log_level = 1
 # Phase 63: far high-voltage wires and the lattice towers are SOLID (no transparency to fade): their thin parts get the same
 # band, and the mod keeps only a share of its pixels, a different random-looking share every frame -- DLAA averages that into
 # a faint continuous line (the way games draw dithered see-through objects).
+# Phase 107b (ETS2): the same for the lattice of CRANES, bridge / guard RAILINGS (their cut-out holes stay as the game cuts
+# them) and ETS2's STREET LIGHTS, each through the mod's exact copy of the game's shader.
 # wire_solid_min_share: the smallest share of the band's pixels kept per frame, 0 .. 1 (default 0.1; 0.25 before phase 68 made
 # far wires about a third darker than the game's own and flicker more). Lower = closer to the
 # wire's real (very faint) darkness but it can twinkle; higher = steadier and darker.
@@ -529,13 +595,15 @@ log_level = 1
 # wire_widen = 1. The log says "solid dither gate (phase 80): wire_solid_static_only=1"; at log_level 4 the "wire widening"
 # stats line ends with the per-pass counts (known static / old rule / not dithered: moving, no static verdict).
 # wire_solid_static_only = 1
+# Phase 112: a Picture fix -- live from the menu (row shown with picture_preset = custom); with recommended / off the preset sets it. Not in recommended yet.
 # wire_widen = 0
 # The band width in pixels, 0.5 .. 3 (default 1.0). Larger = steadier but softer / wider far wires.
 # Phase 67: the band has soft edges (darkest in the middle, fading to nothing at 1 x wire_min_px either side), so a sloped far
 # wire stays an even line under DLAA instead of a row of beads / stair steps (a hard 1 px band did that).
 # wire_min_px = 1.0
 
-# EXPERIMENTAL, off by default (phase 77, startup only: no menu row, no key; restart the game after a change).
+# ON by default since phase 112c (in the Picture preset's recommended set; phase 77, startup only: restart the game after a
+# change; phase 112: menu row Far fence and leaf fix).
 # Far chain-link fences, railings and other cut-out (see-through) textures shimmer and vanish with distance: the game builds
 # the smaller versions (mip maps) of their transparency by averaging 2 x 2 texels and keeping only what is more than half
 # covered, so a 1-2 texel wire is gone after 2-3 halvings (the ATS fence: 17.5 % covered up close, 6 % further away, then
@@ -543,15 +611,23 @@ log_level = 1
 # of covered texels as the full-size one (the most-covered spots first, still fully see-through or fully solid), so a far
 # fence thins into an even pattern for DLAA instead of disappearing. Only textures whose transparency is a clean cut-out
 # (fully see-through or solid) with 2 .. 60 % coverage that really lose coverage in the game's own versions; the colour is
-# untouched. The work runs on a background thread at low priority, so loading does not wait for it (the loading thread
+# untouched. Phase 107a: tree leaves count as cut-outs too -- their edges are anti-aliased (a thin soft rim between fully
+# see-through and solid), which used to look like soft transparency; soft gloss / decal / glass alphas are still left alone.
+# The work runs on background threads at low priority, so loading does not wait for it (the loading thread
 # only copies the texture, about 1 ms for 2048 x 2048). The rebuilt versions are used only once the texture is drawn as a
-# see-through cut-out, so car paint and other textures with a different use of alpha keep the game's. 1 = on, 0 = off (default).
+# see-through cut-out, so car paint and other textures with a different use of alpha keep the game's. 1 = on (default since
+# phase 112c: in the Picture preset's recommended set -- the user confirmed far fences OK 2026-11-01; the risk is loader stutter
+# on streaming bursts: phase 112r caps a loader thread's wait for the full queue at 4 ms per texture and 20 ms per second, and
+# never the render / present thread), 0 = off.
 # The log says "cut-out mips (phase 77): on"; log_level 3 adds "cut-out mips: first texture rebuilt ...", log_level 4 one line
 # per candidate texture + a "cut-out mips: seen .. patched .." count (with log_level 4 the texture uploads are also counted per
 # format, on or off).
-# cutout_mips = 0
+# Phase 112: a Picture fix (112c: in recommended); the setting changes live, the textures follow at the NEXT game start (Off
+# too: it switches the setting off, the running textures stay until the restart).
+# cutout_mips = 1
 # phase 77: the largest texture side the cut-out rebuild looks at (64..4096, default 4096). Lower it only to save memory
-# (a 4096 x 4096 texture needs about 80 MB for a moment on the background thread).
+# (a 4096 x 4096 texture needs about 80 MB for a moment on a background thread; with two worker threads -- 8 or more logical
+# CPUs -- up to about 160 MB at once).
 # cutout_max_dim = 4096
 
 # Phase 79 REWIND for the shimmer capture key (Insert) -- a TEST TOOL, off by default. The capture itself starts about 1.5 s after the key, when the
@@ -583,6 +659,7 @@ log_level = 1
 # they left a trail behind them while driving at night. With this on, the mod draws those glows once more into a mask and tells
 # DLSS to take them (and the pixels where they were a frame ago) from the current frame. Lower it (25 % steps) if lamp glows
 # start to flicker. The tuning menu's "Light trail fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
+# Phase 112: a Picture fix -- live from the menu (row shown with picture_preset = custom); with recommended / off the preset sets it.
 # dlss_bias_mask = 100
 # Phase 100 MOTION BLUR (issue #33), FLAT ONLY, strength in % 0..200 (25 % steps; 100 = one frame of motion), default 0 = off. Fast-moving things get a
 # smear along their own motion (the mod's per-object motion vectors), like in films. Your own truck and the cab move with the
@@ -592,6 +669,20 @@ log_level = 1
 # Test view: 1 = every blurred pixel is tinted pink (stronger for a longer smear), to see where the blur works. The menu row's
 # last step "200 % + pink (test)".
 # motion_blur_show = 0
+# Phase 103 OWN-VEHICLE SHADOW GRID LOCK, 0/1, default 1 (on; phase 105a: was 0). While you drive, your own truck's shadow on
+# the road steps a few pixels every frame (with the mod off too): the game's sun shadow maps follow the camera without snapping to
+# their texel grid, so the truck lands on a new sub-texel spot in them each frame. With 1 the mod shifts each shadow map's drawing
+# by a fraction of a texel and corrects the game's shadow lookups by the same amount, so the truck always lands on the same spot
+# and its shadow edge stays still. The shadows of the world around you may step a little instead (they did before as well).
+# Menu row "Steady own shadow" (Picture group) and key_shadow_lock switch it live, also from a start with shadow_lock = 0 and
+# shadow_lock_diag = 0; Shift+F12 / Save writes it, Reset sets it back to 1.
+# Phase 112: a Picture fix -- live from the menu (row shown with picture_preset = custom); with recommended / off the preset sets it.
+# shadow_lock = 1
+# The sub-texel spot the truck is held on, 0..1 (default 0.5). Only for tests.
+# shadow_lock_phase = 0.5
+# 1 (default while the feature is new) = the mod finds the shadow maps and their lookups every frame and writes "shadow lock
+# (phase 103)" lines to the log, also with shadow_lock = 0 (that log answers how VR draws its shadows). 0 = nothing, no cost.
+# shadow_lock_diag = 1
 
 # Phase 82 GAME TAA: the game's own TAA together with the mod. The mod is made for the game's Anti-aliasing set to Disabled
 # (r_aa 0) -- keep game_taa = 0 then. With the game's Anti-aliasing = TAA (r_aa 5) the mod's DLAA would run on an already TAA'd
@@ -647,7 +738,8 @@ log_level = 1
 # Start state; live Shift+F1..F4 select default / E / F / M directly (Shift+F12 saves the current value here)
 # dlss_preset = default
 
-# RCAS sharpen strength after DLAA, 0..1 (0 = off: pass skipped). Start state; Shift+F7 / Shift+F8 change it
+# RCAS sharpen strength after DLAA, 0..2 (phase 104: was 0..1; 0 = off: pass skipped). Above 1 RCAS pushes its change
+# further (AMD's own limit is 1); NIS stays at 1. Start state; Shift+F7 / Shift+F8 change it
 # live in 0.1 steps (v0.5.7: the sharpen texture always exists, ~120 MB per eye in VR; Shift+F12 saves)
 # sharpness = 0.4
 
@@ -655,6 +747,30 @@ log_level = 1
 # radius (e.g. 1.5) averages two neighbours. The 2x-supersampled VR eye image needs > 1 px to show any
 # sharpening. Start state; Shift+F9 / Shift+F10 change it live in 0.5 steps (Shift+F12 saves)
 # sharp_radius = 1.5
+
+# Phase 101: the sharpen filter, rcas (AMD, default) or nis (NVIDIA Image Scaling sharpen: along edges only, fewer halos;
+# sharp_radius not used). Menu row Sharpen type.
+# sharpen_type = rcas
+
+# Phase 105b SHARPEN PRESET: off | soft | balanced | crisp | extra | custom. Menu row Sharpen preset (112c: the FIRST row of
+# the sharpening part of the Picture group). A named preset sets ALL the sharpening in one go (112c: + sharpen_type rcas and
+# sharp_radius 1.5 for every named one; off = sharpness 0 only):
+#   off = sharpness 0, soft = 0.4 / 0 % / colour (the fresh-install values), balanced = 0.8 / 0 % / colour,
+#   crisp = 1.2 / 10 % / brightness only, extra = 1.6 / 20 % / brightness only, custom = your own values.
+# The Sharpen strength, Sharpen type, Sharpness size, Halo limit and Sharpen colour rows are shown only with custom. Changing
+# one by hand (row or Shift+F7..F10) makes it custom. At start: no sharp_preset line = the preset whose values match, else
+# custom (an old dlaa.ini keeps its values); a named preset fills the keys this file does not set, and if a key it does set
+# differs from the preset, custom is used (your value is kept). Shift+F12 / Save writes it.
+# sharp_preset = soft
+
+# Phase 104 RCAS HALO LIMIT, 0..50 (%), default 0. How far the sharpened value may overshoot the range of the 5 pixels RCAS
+# looks at, in % of that range. 0 = no overshoot (the v0.5.9 anti-ringing clamp: safe, but it removes most of what reads as
+# sharpness); 10..25 = crisper edges with thin halos. RCAS only. Menu row Halo limit (5 % steps); Shift+F12 / Save writes it.
+# sharp_halo = 0
+
+# Phase 104 RCAS BRIGHTNESS-ONLY, 0/1, default 0. 1 = only light and dark are sharpened (the brightness change is added to all
+# three colours): no red / blue fringes on coloured edges. RCAS only. Menu row Sharpen colour.
+# sharp_luma = 0
 
 # v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (10..100, v0.10.0; was
 # 40..100; pixel count ~ area^2, e.g. 70 -> 49 %, 20 -> 4 %), centred on the eye's optical centre. 100 = whole image
@@ -670,7 +786,7 @@ log_level = 1
 # railings, gantries and lamp heads against the sky flickered more than in the game without the mod).
 # 2 = default: the outside is resampled at the frame's jitter shift (sharp bicubic, so it no longer moves) and its edges are
 #     smoothed (FXAA-style); 1 = the resampling only; 0 = the raw jittered frame (before phase 81).
-# Blended into the rect with dlaa_area_feather. Nothing runs at dlaa_area 100, with the jitter or DLAA off. Startup only.
+# Blended into the rect with dlaa_area_feather. Nothing runs at dlaa_area 100, with the jitter or DLAA off. A Picture fix (112: live).
 # outside_aa = 2
 
 # v0.7.0 DLSS upscaling: 1 = when the eye texture / backbuffer is larger than the scene (game r_scale_x / r_scale_y
@@ -744,6 +860,11 @@ log_level = 1
 # the panel's centre), 0 = a flat picture as before. With menu_vr_layer = 1 (v0.10.3) also the fps box while it follows
 # the headset; the compositor turns the layers. The menu's "Panel faces you (VR)" row switches it live.
 # menu_vr_face = 1
+
+# Phase 112c PANEL PRESET: recommended | custom. Menu row Panel preset (VR, Menu panel group). recommended = menu_vr_depth /
+# menu_vr_dist / menu_vr_lock_dist / menu_vr_face at their defaults (12 / 100 / 80 / 1); custom = your own (the Panel depth and
+# Panel faces you rows are shown only then). No line = picked from those values.
+# panel_preset = recommended
 # VR (v0.10.3): 1 = the panel and the fps box are separate OpenXR QUAD LAYERS: the headset's compositor shows them on top of
 # the game picture itself, so they stay rock-steady (no swimming with the reprojection), sit at a real distance (the
 # panel menu_vr_dist, the fps box 0.8 m) and are never covered by the game's own menus. menu_vr_x / menu_vr_y /
@@ -913,6 +1034,18 @@ key_mv_dilate = Alt+F10
 key_mv_conservative = Alt+F11
 # phase 61: far wires drawn at least wire_min_px wide (wire_widen) on / off
 key_wire_widen = Alt+F12
+# phase 103: the own-vehicle shadow lock (shadow_lock, menu row Steady own shadow) on / off live, e.g. for an A/B test at the
+# same spot. Phase 105a: the same switch as the menu row; Save writes it. High beep = on, low beep = off.
+key_shadow_lock = Ctrl+Shift+F3
+# phase 108: shader census -- the live tint view of the suspect draws on / off, and a mark (time + suspects on screen + picture)
+# phase 110: key_census_view = the menu row Show unfixed shaders (the same switch; the Save row writes census)
+key_census_view = Ctrl+Shift+F5
+key_census_mark = Ctrl+Shift+F6
+# phase 109d: Thin pole fix (pole_aa) on / off live -- the same switch as the menu row; Save writes it
+key_pole_aa = Ctrl+Shift+F4
+# phase 112: Picture preset recommended <-> off live (compare every fix at once; from custom: off, then back). High beep =
+# recommended, two high = custom, low = off; a short note on screen names the state. 112c: was key_picture_fixes (still read).
+key_picture_preset = Ctrl+Shift+F7
 # v0.10.0 tuning menu: open / close, and (only while it is open) select a row up / down and change it left / right.
 # v0.10.2: the game sees no key / button at all while the menu is open; closed, they belong to the game. The menu's
 # Menu keys row binds these 5 by holding the new keys (docs/KEYS.md, "Bind a key in the menu").

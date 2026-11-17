@@ -74,7 +74,8 @@ menu and the garage / truck dealer screens, before a save is loaded).
   what it costs or saves (the measured figure is added while the GPU timers run). There are no greyed rows -- a row
   that cannot do anything in your setup right now is HIDDEN (the other mode's rows; `AMD cache cores (X3D)` without a two-group
   X3D CPU; `Low delay (Reflex)` without support; the Foveated rows without VRS, their sub-rows while Foveated rendering is off;
-  `Sharpness size` at Sharpen strength 0; `Leaves and fences sharpness` at Texture sharpness 0; `Mirrors take turns` with the
+  all five sharpen value rows (`Sharpen strength`, `Sharpen type`, `Sharpness size`, `Halo limit`, `Sharpen colour`) unless the
+  `Sharpen preset` is Custom (phase 112c); the Picture fix rows unless the `Picture preset` is Custom; `Leaves and fences sharpness` at Texture sharpness 0; `Mirrors take turns` with the
   mirrors off; the Mix amount / split rows when the mode does not use them; `Panel lock` without the VR layer; the DLAA
   quality rows while the main scene runs no DLAA; `OFXR Bridge` / `VectorXR` when not present; the `In-game UI` group while the
   game's console is off -- set `g_developer "1"` and `g_console "1"` in the game's config.cfg with the game closed).
@@ -217,6 +218,11 @@ The log says what changed, e.g.
 Model select is direct: pressing the model that is already active just re-beeps (no change).
 `Shift+F12` saves `dlss_preset`, `dlaa_area`, `sharpness`, `sharp_radius`, `dlss_upscale`, `tex_lod_bias`, `tex_lod_bias_cutout` (the `Ctrl+Shift+F1` / `F2` value), `mv_objects` and `mirror_dlaa` (the `Alt+F5` / `Alt+F6` states), `dlaa_pre_tonemap` (the
 `Alt+F7` state) and `perf_profile` (the `Alt+F9` state) and leaves every other line of `dlaa.ini` untouched.
+The menu's Save row also writes the presets: `sharp_preset` (Sharpen preset), `picture_preset` (Picture preset; the fix keys
+only with `custom`), `vrs_preset` (Foveated preset) and `panel_preset` (Panel preset), and `census` (Show unfixed shaders).
+`census_dump` and `census_max_mb` are startup-only `dlaa.ini` keys: Save and Reset leave them as they are.
+`mv_fwd_depth` (Glass and fence fix, `Ctrl+F3`) is written when you set it yourself -- in `dlaa.ini`, with the key or its row --
+with any Picture preset (phase 112r), else only with a `custom` Picture preset.
 `dlss_preset`, `dlaa_area` and `mirror_dlaa` are only written when you set them yourself (in `dlaa.ini` or with
 their own key) -- a value that only comes from the performance profile is not written, so the next profile still moves it.
 The same holds for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` or with the menu's Smooth mirrors row);
@@ -273,11 +279,13 @@ debug colours).
 | `Ctrl+F6`  | MV debug view (see below)              | — |
 | `Ctrl+F7`  | Passive mode on / off                  | 1 low tone = ON, 2 low tones = OFF |
 | `Ctrl+F8`  | Jitter-only debug on / off             | — |
-| `Insert` twice | One-press bug report: two presses within 1 s (the first arms: one short beep). System info, logs, `dlaa.ini`, PNG frames into `dlaa_selftest\shimmer_<date>_<time>\`, split into zips by kind of at most 24 MB each -- `shimmer_<time>_main.zip` (always attach), `shimmer_<time>_full.zip` (only with Capture includes = full) and `shimmer_<time>_rewind.zip` (only with Rewind before key on) (one beep = start, two rising = zips ready, one low = a file failed) | 1 short (armed), 1 (start), 2 rising (done) |
+| `Insert` twice | One-press bug report: two presses within 1 s (the first arms: one short beep). System info, logs, `dlaa.ini`, PNG frames into `dlaa_selftest\shimmer_<date>_<time>\`, split into zips by kind of at most 24 MB each -- `shimmer_<time>_main.zip` (always attach), `shimmer_<time>_full.zip` (only with Capture includes = full) and `shimmer_<time>_rewind.zip` (only with Rewind before key on) (one beep = start, two rising = zips ready, one low = a file failed). Phase 110: with **Show unfixed shaders** on, the report also holds `census\` (in the `_main` zip): every suspect draw on screen right after the key, with its shaders, textures, constant buffers, draw state and a picture | 1 short (armed), 1 (start), 2 rising (done) |
 | `Ctrl+F9`  | Self-test (dumps frames: `<mode>_<n>.bmp` = DLAA output, `final_<mode>_<n>.bmp` = the picture on screen, same frame) | — |
 | `Ctrl+F10` | NGX input snapshot, each press into its own folder `dlaa_snap\<n>_blit<blit>\` (on the menu / truck-preview screen: a measuring capture, short freeze) | — |
 | `Ctrl+F11` | Frame trace                            | — |
 | `Ctrl+F12` | Cycle NGX jitter sign                  | — |
+| `Ctrl+Shift+F5` | **Show unfixed shaders** on / off (phase 108; phase 110: the same switch as the menu row in the Bug report group, live, no restart): every draw the census suspects of flickering is tinted -- **magenta** = lit edges read the wrong pixel, **orange** = see-through leaves / fences that fade or sparkle at a distance, **cyan** = very thin objects (wires, posts) smaller than a pixel, **blue** = water the mod does not handle yet, **yellow** = a known object drawn in a new way. Phase 116: an object whose only problem a switched-off fix of the mod covers is not tinted (the bug icon counts it as "N: fix is off"). A legend box (each colour in its colour, and the capture / census keys as you bound them) shows for 15 s at every switch-on and while the menu sits on the row (phase 112b). While it is on, `Insert` twice also saves every suspect on screen into the bug report (`census\` in the `_main` zip). The Save row writes `census` | 1 high = ON, 2 low = OFF |
+| `Ctrl+Shift+F6` | Shader census mark: "MARK n" with the time and the suspects on screen goes into `dlaa_census.txt`, plus a picture `dlaa_census\marks\mark_NN.png` -- press it when you see flicker. Needs Show unfixed shaders on | 2 short high |
 
 MV debug view (`Ctrl+F6`, needs DLAA or DLSS on): the picture is replaced by the motion vectors —
 red = horizontal and green = vertical motion (still pixels are a flat olive), blue added = cabin
@@ -385,9 +393,14 @@ Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`,
 | `key_pre_tonemap` | Main-picture DLAA before / after the game's tonemap | `Alt+F7` |
 | `key_mv_dump` | Per-draw motion-vector dump of the next frame into the log (diagnostic) | `Alt+F8` |
 | `key_perf_profile` | Performance profile high -> medium -> low | `Alt+F9` |
-| `key_mv_dilate` | Thin-wire motion (DLSS motion-vector dilation in DLAA) on / off | `Alt+F10` |
-| `key_mv_conservative` | Thin-wire depth: mode 1 -> 2 -> 0 | `Alt+F11` |
-| `key_wire_widen` | Thin-wire widening on / off (experimental, off by default) | `Alt+F12` |
+| `key_mv_dilate` | Thin-wire motion (DLSS motion-vector dilation in DLAA) on / off (a Picture preset fix: pressing it makes the Picture preset `Custom`) | `Alt+F10` |
+| `key_mv_conservative` | Thin-wire depth: mode 1 -> 2 -> 0 (a Picture preset fix: pressing it makes the Picture preset `Custom`) | `Alt+F11` |
+| `key_wire_widen` | Thin-wire widening on / off (experimental, off by default) (a Picture preset fix: pressing it makes the Picture preset `Custom`) | `Alt+F12` |
+| `key_shadow_lock` | Steady own shadow (the own-vehicle shadow lock, `shadow_lock`) on / off live -- the same switch as the menu row **Steady own shadow** (Picture); the Save row writes it. Phase 112: a Picture preset fix -- pressing it makes the Picture preset `Custom` | `Ctrl+Shift+F3` |
+| `key_census_view` | Show unfixed shaders on / off (live): draws the mod does not handle yet that are likely to flicker are tinted (magenta = lit edges reading the wrong pixel, orange = see-through leaves / fences, cyan = sub-pixel thin objects, blue = water not handled yet, yellow = a known object drawn in a new way; a legend box explains them; objects whose fix is only switched off are not tinted, the bug icon counts them as "N: fix is off") -- the same switch as the menu row **Show unfixed shaders** (Bug report); the Save row writes `census`; see "Finding flicker" in the README | `Ctrl+Shift+F5` |
+| `key_census_mark` | Shader census mark: writes MARK n with the time and the suspects on screen into `dlaa_census.txt` + a picture `dlaa_census\marks\mark_NN.png` | `Ctrl+Shift+F6` |
+| `key_pole_aa` | Thin pole fix (`pole_aa`, test feature, off by default) on / off live -- the same switch as the menu row **Thin pole fix** (Picture); the Save row writes it. Phase 112: a Picture preset fix -- pressing it makes the Picture preset `Custom` | `Ctrl+Shift+F4` |
+| `key_picture_preset` | Picture preset `Recommended` <-> `Off` live (phase 112; 112c: was `key_picture_fixes`, still read): every fix the mod adds against flicker / trails / shimmer off and on again at once, to compare (DLAA / DLSS itself stays on; `Wire fix: motion` stays as it is -- switching it rebuilds every DLSS feature, a short hitch, so it is changed in `Custom` only, phase 112r). If `dlaa.ini` has both names, `key_picture_preset` wins. From `Custom`: to `Off`, and the next press back to the same custom values. A short note on screen names the new state; the same switch as the menu row **Picture preset** (Picture) | `Ctrl+Shift+F7` |
 | `key_menu` | Tuning menu open / close | `Delete` |
 | `key_menu_up` / `key_menu_down` | Tuning menu: select the row above / below (repeats while held; menu open only) | `Up` / `Down` |
 | `key_menu_left` / `key_menu_right` | Tuning menu: change the selected row down / up (repeats on the step rows; menu open only) | `Left` / `Right` |

@@ -325,8 +325,9 @@ class TestCutoutMips(Base):
         self.verdict(rows, "Cut-out alpha mips", "OFF")
 
     def test_off_default_no_line(self):
+        # phase 112c: the code default is 1 now (Picture preset Recommended) -- "off" needs the line in dlaa.ini
         lines = head(version="0.15.2") + vr_world() + [unload(600, 1200)]
-        sess, rows, _ = self.run_log(lines, ini="")
+        sess, rows, _ = self.run_log(lines, ini="cutout_mips = 0\n")
         self.verdict(rows, "Cut-out alpha mips", "OFF")
 
     def test_pass_level4(self):
@@ -467,6 +468,30 @@ class TestOutsideAa(Base):
         sess, rows, _ = self.run_log(head(version="0.15.1") + vr_world() + [unload(600, 1200)], ini="")
         self.verdict(rows, self.ROW, "N/A")
 
+
+
+class TestPictureFixes(Base):
+    """phase 112: the Picture fixes preset (row / key_picture_fixes / Reset) switches every fix of its set live in ONE line,
+    key=value per fix: each fix's timeline must take it as a live change (Off = 0), and Standard again as the next one."""
+    OFF = ("picture fixes now off (Ctrl+Shift+F7, Present #1300): dlss_bias_mask=0 shadow_lock=0 pole_aa=0 dlaa_mv_dilate=0 "
+           "mv_fwd_conservative=0 wire_widen=0 power_line_fix=0 pixel_reader_fix=0 light_redraw_jitter=0 light_fs_jitter=0 "
+           "water_overscan_fix=0 outside_aa=0")
+    STD = ("picture fixes now standard (Ctrl+Shift+F7, Present #1500): dlss_bias_mask=100 shadow_lock=1 pole_aa=0 dlaa_mv_dilate=1 "
+           "mv_fwd_conservative=1 wire_widen=0 power_line_fix=1 pixel_reader_fix=1 light_redraw_jitter=1 light_fs_jitter=1 "
+           "water_overscan_fix=1 outside_aa=2")
+
+    def test_off_then_standard_are_live_changes(self):
+        sess, rows, _ = self.run_log(head() + vr_world() + [self.OFF, self.STD, unload(600, 1200)], ini="")
+        for key, std in (("outside_aa", 2), ("light_fs_jitter", 1), ("dlss_bias_mask", 100), ("water_overscan_fix", 1)):
+            ch = fc.key_timeline(sess, key, lambda v: fc.num(v)).changes()
+            self.assertEqual([v for _, v, _ in ch][-2:], [0, std], "%s: live changes %r" % (key, ch))
+
+    def test_other_lines_not_live(self):
+        # the start-up "picture fixes (phase 112): ..." line names keys without "=": no value is taken from it
+        start = ("picture fixes (phase 112): custom (no picture_fixes key: picked from the fix values) -- differs from Standard in:")
+        diff = "picture fixes (phase 112): the Custom set differs from Standard in: cutout_mips 1"
+        sess, rows, _ = self.run_log(head(extra=[start, diff]) + vr_world() + [unload(600, 1200)], ini="")
+        self.assertEqual(fc.key_timeline(sess, "cutout_mips", fc.to_bool).changes(), [])
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

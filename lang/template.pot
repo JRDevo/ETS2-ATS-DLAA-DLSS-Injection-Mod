@@ -4,6 +4,95 @@ msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "Census: flashing colours = no fix in the mod yet"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid ""
+"Each colour is a different kind of problem (thin, see-through, water, ...). You do not need to "
+"know which."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+#, c-format
+msgid "Something coloured? Press %ls twice. That saves it so it can be fixed."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "Something coloured? Bug report > Capture now saves it so it can be fixed."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+#, c-format
+msgid "Saved objects stop flashing until the next game start. Colours off: %ls."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid ""
+"Saved objects stop flashing until the next game start. Colours off: Bug report > Show unfixed "
+"shaders."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "The bug icon counts what is left to capture here."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "Objects with a fix that is switched off are not coloured: see Picture preset > Custom."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "thin"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "see-through"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "pixel"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "water"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+msgid "new"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+#, c-format
+msgid "%d to capture"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+#, c-format
+msgid "%d captured"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/census_legend.h
+#, c-format
+msgid "%d: fix is off"
+msgstr ""
+
 #. Value column (about 20 Latin characters)
 #: src/fps_pose.h
 msgid "white"
@@ -208,15 +297,148 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"Picture quality: the Picture preset (all the fixes), the Sharpen preset, texture sharpness and "
 "the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high "
-"gives bright halos on edges. Costs about 0.1 ms; 0 skips the pass."
+"All the mod's fixes against flicker, trails and shimmer in one switch. Recommended = the tested "
+"fixes on (default). Off = all of them off, live: compare, and if something looks wrong only with "
+"them on, tell us. Custom = set each fix in the rows below."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Recommended follows the Quality preset (low = off). Turning it "
+"off saves 0.02 - 0.06 ms per eye."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Stops your own truck's shadow from crawling and flickering while you drive: the game moves its "
+"sun shadow a little each frame, this keeps your vehicle on the same shadow grid. Turn it off to "
+"compare. Costs a little CPU, no GPU."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Far red and white road poles stop breaking up into dashes: their thinnest faces are drawn as a "
+"faint even line of their real width. Test feature, off by default; turn it on and compare. Costs "
+"very little GPU."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Power lines the game draws about 1 pixel wide get their own motion on every pixel, so far lines "
+"do not smear or break into dashes while you drive. on = default. Only while the Glass and fence "
+"fix is on. No extra cost."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Lane markings, road decals and long wires read the light of their own pixel, not the neighbour's, "
+"so their thin lit edges stop changing colour every frame. on = default. If it was off when the "
+"game started, on works after a restart."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Light through a tent canopy and glowing surfaces stays lit on every frame instead of switching "
+"off now and then. on = default. No extra cost."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Soft shadow edges on roofs and other surfaces seen at a flat angle stop flickering dark with the "
+"mod's sub-pixel steps. on = default. Almost no cost."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The new SCS water (Iceland and later maps) no longer vanishes in blocks that move with the "
+"picture. on = default. Almost no cost."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, DLAA area below 100 %: outside the DLAA square the picture no longer shakes with the mod's "
+"sub-pixel steps (steady) and its edges are smoothed (steady + smooth, default). off = the raw "
+"picture there."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Far chain-link fences, railings and leaves keep their density instead of fading away with "
+"distance. On in Recommended. Works from the next game start: the textures are rebuilt while the "
+"game loads them."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"All sharpening in one choice. Off = none. Soft and Balanced keep edges clean; Crisp and Extra "
+"crisp are sharper, with thin halos. Custom = set strength, filter, size, halo and colour yourself "
+"in the rows below. Changing a value by hand makes it Custom."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Sharpens the picture after DLAA, 0 (off) to 2.0. Raise it if the picture looks soft; too high "
+"gives bright halos on edges. Above 1.0 RCAS pushes harder (NIS stops at 1.0). Costs about 0.1 ms; "
+"0 skips the pass."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Which sharpen filter runs. RCAS (AMD) = even sharpening, its size is set below. NIS (NVIDIA Image "
+"Scaling) = sharpens along edges only and less on bright parts: fewer halos. Try both; NIS costs a "
+"bit more."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -225,6 +447,22 @@ msgid ""
 "How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it "
 "if the sharpening looks too fine or too coarse; a picture drawn larger than the screen, as in VR, "
 "needs more than 1 px."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"A halo is a thin light or dark line next to an edge. This sets how far an edge may be pushed past "
+"its neighbours, 0 - 50 %. 0 = no halos, but little visible sharpening. 10 - 25 % = crisper edges "
+"with thin halos. No extra cost."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"colour = each colour sharpened on its own (can leave red or blue fringes on coloured edges). "
+"brightness only = only light and dark are sharpened: no colour fringes. Try it if edges show "
+"coloured rims. No extra cost."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -240,22 +478,6 @@ msgid ""
 "The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
 "grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
 "Almost no cost."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
-"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
-"per eye."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
-"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
-"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -374,6 +596,13 @@ msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
 "only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Recommended = Foveated rendering's size, lighting and strength at their tested defaults. Custom = "
+"set Foveated size, Foveated: lighting too and Foveated strength yourself in the rows below."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -618,6 +847,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Recommended = the panel's depth and facing at their defaults. Custom = set Panel depth "
+"and Panel faces you yourself in the rows below. No cost."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
 "the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
 "Change it if the panel is tiring to look at. No cost."
@@ -634,9 +870,9 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
-"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
-"closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, running DLAA "
+"earlier (the fixes: Picture preset). Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -667,29 +903,6 @@ msgid ""
 "What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
 "or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
 "only while Split with game TAA is on."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
-"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
-"you switch."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
-"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
-"near wires flicker more."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -751,6 +964,14 @@ msgstr ""
 msgid ""
 "How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
 "deleted when a new one is written. all = never delete."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Helps find flicker the mod does not fix yet: such draws are coloured, and a legend says what each "
+"colour means (15 s, and while this row is selected). See one flicker? Press the capture key "
+"twice: the zip then holds what we need to fix it. Off = no cost."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -1030,6 +1251,12 @@ msgstr ""
 #: src/inject.cpp
 #, c-format
 msgid "CPU %ls ms per frame now (the sampler swaps)."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "CPU %ls ms per frame now; off saves most of it."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -1662,6 +1889,11 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Picture preset Recommended / Off"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "See-through depth"
 msgstr ""
 
@@ -1693,6 +1925,26 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Shimmer capture"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Steady own shadow on / off"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Show unfixed shaders"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Shader census mark"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thin pole fix on / off"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
@@ -2014,6 +2266,161 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Picture preset"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Recommended"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Custom"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "off (VR budget)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Light trail fix"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Steady own shadow"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thin pole fix"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: motion"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (no A2C)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (experimental)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Power line fix"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Lit edge fix"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (next start)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Lit surface fix"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Roof shadow fix"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Water block fix"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Outside the DLAA area (VR)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Outside the DLAA area"
+msgstr ""
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "VR only"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "steady + smooth"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "steady"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Far fence and leaf fix"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "off (next start)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen preset"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Soft"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Balanced"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Crisp"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Extra crisp"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Sharpen strength"
 msgstr ""
 
@@ -2025,6 +2432,21 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Sharpen type"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "NIS (NVIDIA)"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "RCAS (AMD)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Sharpness size"
 msgstr ""
 
@@ -2032,6 +2454,26 @@ msgstr ""
 #: src/inject.cpp
 #, c-format
 msgid "%.1f px"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Halo limit"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen colour"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "brightness only"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "colour"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
@@ -2064,11 +2506,6 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "DLAA area"
-msgstr ""
-
-#. Keys: the Hotkey column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "VR only"
 msgstr ""
 
 #. Value column (about 20 Latin characters)
@@ -2125,52 +2562,12 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Wire fix: motion"
-msgstr ""
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Wire fix: depth"
-msgstr ""
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "on (no A2C)"
-msgstr ""
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Thicker wires (test)"
-msgstr ""
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "on (experimental)"
-msgstr ""
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
 msgid "Run DLAA earlier (test, flat)"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Run DLAA earlier (test)"
-msgstr ""
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Glass and fence fix"
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "off (VR budget)"
-msgstr ""
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Light trail fix"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
@@ -2319,6 +2716,11 @@ msgstr ""
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "not supported"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Foveated preset"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
@@ -2635,6 +3037,16 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel size"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel preset (VR)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel preset"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)

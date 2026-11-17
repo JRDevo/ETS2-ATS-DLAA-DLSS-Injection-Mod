@@ -304,12 +304,15 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 // kRcasShader-BEGIN (the build validates this block with fxc)
 const char kRcasShader[] = R"(
 cbuffer RcasCB : register(b0) {
-    float  Sharpness;       // 0..1 user strength (final lobe scale)
+    float  Sharpness;       // 0..2 user strength (phase 104: was 0..1; RCAS lobe scale up to 1, extrapolated above)
     float  Radius;          // v0.5.8 ring-tap radius in texels (1..4), bilinear
     float  Feather;         // v0.6.4 border blend width in px (0 = hard edge)
     float  Blend;           // v0.6.4 1 = blend into Orig at the rect border (area < 100), 0 = off
     float4 EdgeOn;          // v0.6.4 (left, top, right, bottom): 1 = that rect edge is inside the image
-    float4 Mode;            // v0.8.0 x: 1 = HDR (linear RGBA16F, sharpen a compressed value), 0 = LDR; phase 81 yz: Orig offset; w unused
+    float4 Mode;            // v0.8.0 x: 1 = HDR (linear RGBA16F, sharpen a compressed value), 0 = LDR; phase 81 yz: Orig offset;
+                            // phase 101 w: 1 = NIS sharpen instead of RCAS
+    float4 Rcas2;           // phase 104 x: halo limit 0..0.5 (share of the 5-tap range the result may overshoot; 0 = v0.5.9 clamp),
+                            // y: 1 = brightness-only (the luma change on all channels), zw: unused
 };
 Texture2D<float4>   Src                : register(t0);
 Texture2D<float4>   Orig               : register(t1);   // v0.6.4 colorIn (only read when Blend = 1); phase 81: or the scratch
@@ -323,6 +326,74 @@ float Max3(float3 c) { return max(c.r, max(c.g, c.b)); }
 // v0.8.0 reversible tonemapper (HDR only): linear >= 0 -> [0, 1) and back (exact inverse for max3 >= 0).
 float3 HdrCompress(float3 c) { return c / (1.0 + max(Max3(c), 0.0)); }
 float3 HdrExpand(float3 c)   { return c / max(1.0 - max(Max3(c), 0.0), 1.0e-5); }
+
+// phase 101 NIS SHARPEN (issue #34; dlaa.ini sharpen_type = nis, Mode.w = 1): the sharpen-only path of the NVIDIA Image Scaling
+// SDK v1.0.3 (NIS_Scaler.h NVSharpen, MIT licence, see THIRD_PARTY.md), ported to this pass. A 5x5 luma window; a 3x3
+// edge map picks the edge direction (0 / 90 / 45 / 135 deg), an unsharp mask runs ACROSS that edge only, its strength and limit
+// follow the centre luma (less on bright pixels) and a contrast-ratio test damps it near one-sided edges (halo control). The
+// result is added to all three channels. Sharpness 0..1 = the SDK's slider (the SDK constants of NVSharpenUpdateConfig, SDR).
+// HDR units run it on the same reversibly compressed values as RCAS. Radius is not used (NIS has a fixed 5x5 footprint).
+float NisY(float3 c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+static const float kNisDetectRatio = 2.0 * 1127.0 / 1024.0;
+static const float kNisDetectThres = 64.0 / 1024.0;
+static const float kNisMinContrast = 2.0;
+static const float kNisRatioNorm   = 1.0 / (10.0 - 2.0);   // 1 / (max - min contrast ratio)
+static const float kNisSharpStartY = 0.45;
+static const float kNisSharpScaleY = 1.0 / (0.9 - 0.45);   // 1 / (end - start)
+static const float kNisEps         = 1.0 / 255.0;
+float NisLti(float y0, float y1, float y2, float y3, float y4) {   // CalcLTIFast: 1 = full USM, 0 = none (one-sided edge)
+    const float aCont = max(max(y0, y1), y2) - min(min(y0, y1), y2);
+    const float bCont = max(max(y2, y3), y4) - min(min(y2, y3), y4);
+    const float ratio = max(aCont, bCont) / (min(aCont, bCont) + kNisEps);
+    return 1.0 - saturate((ratio - kNisMinContrast) * kNisRatioNorm);
+}
+float NisUsm(float y0, float y1, float y2, float y3, float y4, float strength, float limit) {   // EvalUSM
+    float u = (-0.6001 * y1 + 1.2002 * y2 - 0.6001 * y3) * strength;
+    u = clamp(u, -limit, limit);
+    return u * NisLti(y0, y1, y2, y3, y4);
+}
+// p[y][x] = the luma at (x - 2, y - 2) around the pixel. Returns the luma change for the centre.
+float NisSharpenY(float p[5][5], float sharpness) {
+    // NVSharpenUpdateConfig (SDR): the slider 0..1 -> -0.5..+0.5
+    const float s          = sharpness - 0.5;
+    const float maxScale   = s >= 0.0 ? 1.25 : 1.75;
+    const float minScale   = s >= 0.0 ? 1.25 : 1.0;
+    const float limitScale = s >= 0.0 ? 1.25 : 1.0;
+    const float strMin = max(0.0, 0.4 + s * minScale * 1.2);
+    const float strMax = 1.6 + s * maxScale * 1.8;
+    const float limMin = max(0.1, 0.14 + s * limitScale * 0.32);
+    const float limMax = 0.5 + s * limitScale * 0.6;
+    // GetDirUSM: strength / limit ramp with the centre luma
+    const float scaleY   = 1.0 - saturate((p[2][2] - kNisSharpStartY) * kNisSharpScaleY);
+    const float strength = scaleY * (strMax - strMin) + strMin;
+    // phase 101c (audit): >= 0 -- an HDR centre can have a slightly negative compressed luma (DLSS output), and clamp(u, -l, l)
+    // with l < 0 is undefined in HLSL (the SDK's min / max form happened to return l)
+    const float limit    = max((scaleY * (limMax - limMin) + limMin) * p[2][2], 0.0);
+    float4 usm;
+    usm.x = NisUsm(p[0][2], p[1][2], p[2][2], p[3][2], p[4][2], strength, limit);                          // 0 deg (vertical profile)
+    usm.y = NisUsm(p[2][0], p[2][1], p[2][2], p[2][3], p[2][4], strength, limit);                          // 90 deg
+    usm.z = NisUsm(p[1][1], lerp(p[2][1], p[1][2], 0.5), p[2][2], lerp(p[3][2], p[2][3], 0.5), p[3][3], strength, limit);   // 45
+    usm.w = NisUsm(p[3][1], lerp(p[3][2], p[2][1], 0.5), p[2][2], lerp(p[2][3], p[1][2], 0.5), p[1][3], strength, limit);   // 135
+    // GetEdgeMap over the centre 3x3 (rows / cols 1..3)
+    const float g0   = abs(p[1][1] + p[1][2] + p[1][3] - p[3][1] - p[3][2] - p[3][3]);
+    const float g45  = abs(p[2][1] + p[1][1] + p[1][2] - p[3][2] - p[3][3] - p[2][3]);
+    const float g90  = abs(p[1][1] + p[2][1] + p[3][1] - p[1][3] - p[2][3] - p[3][3]);
+    const float g135 = abs(p[2][1] + p[3][1] + p[3][2] - p[1][2] - p[1][3] - p[2][3]);
+    const float g090Max = max(g0, g90),  g090Min = min(g0, g90);
+    const float g45Max  = max(g45, g135), g45Min = min(g45, g135);
+    if (g090Max + g45Max <= 0.0) return 0.0;
+    const float e090 = min(g090Max / (g090Max + g45Max), 1.0);
+    const float e45  = 1.0 - e090;
+    const bool  c090 = g090Max > g090Min * kNisDetectRatio && g090Max > kNisDetectThres && g090Max > g45Min;
+    const bool  c45  = g45Max > g45Min * kNisDetectRatio && g45Max > kNisDetectThres && g45Max > g090Min;
+    const bool  is0  = g090Max == g0;
+    const bool  is45 = g45Max == g45;
+    const float f090 = (c090 && c45) ? e090 : 1.0;
+    const float f45  = (c090 && c45) ? e45 : 1.0;
+    const float4 wgt = float4((c090 && is0) ? f090 : 0.0, (c090 && !is0) ? f090 : 0.0,
+                              (c45 && is45) ? f45 : 0.0, (c45 && !is45) ? f45 : 0.0);
+    return dot(usm, wgt);
+}
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
@@ -343,6 +414,33 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     // (constant buffer). Not taken for HDR: the compress / expand round trip is not bit-exact, so HDR keeps the full path.
     if (!hdr && Sharpness <= 0.0) {
         res = saturate(e0.rgb);
+    } else if (Mode.w > 0.5) {                          // phase 101: NIS sharpen (shader-uniform branch, constant buffer)
+        if (Sharpness <= 0.0) {
+            res = e0.rgb;                               // HDR at 0 (border blend only): unchanged
+        } else {
+            float ny[5][5];
+            float3 mn5 = 1.0e30, mx5 = -1.0e30;           // HDR: the range of the centre + its 4 cross neighbours
+            [unroll] for (int y = 0; y < 5; ++y) {
+                [unroll] for (int x = 0; x < 5; ++x) {
+                    const int2 q = clamp(p + int2(x - 2, y - 2), int2(0, 0), int2((int)w - 1, (int)h - 1));
+                    float3 t = Src.Load(int3(q, 0)).rgb;
+                    if (hdr) t = HdrCompress(t);
+                    ny[y][x] = NisY(t);
+                    if ((x == 2 && y >= 1 && y <= 3) || (y == 2 && x >= 1 && x <= 3)) { mn5 = min(mn5, t); mx5 = max(mx5, t); }
+                }
+            }
+            const float3 e = hdr ? HdrCompress(e0.rgb) : e0.rgb;
+            // phase 104: the slider goes to 2 for RCAS; NIS keeps the SDK's 0..1 range (identical below 1, held at 1 above)
+            float d = NisSharpenY(ny, min(Sharpness, 1.0));
+            // phase 101c (audit): an Inf / NaN texel (FP16 specular overflow) makes d NaN for every pixel whose 5x5 window holds it
+            // (NaN * weight 0 is still NaN) -- a black (LDR) or dark (HDR) 5x5 square. No sharpening there instead.
+            if (!(abs(d) < 1.0e30)) d = 0.0;
+            // phase 101b (Fable review): HDR anti-overshoot. The expand c / (1 - max3) is very steep near 1, so an unclamped delta on
+            // a thin bright feature (lamp, chrome glint at compressed 0.95) became a 26x firefly. Keep the result inside the 5-tap
+            // range like RCAS does: max3 stays below 1 (finite expand), no fixed cap (highlights above linear 499 are kept).
+            // LDR keeps the SDK behaviour (saturate only).
+            res = hdr ? min(HdrExpand(clamp(e + d, mn5, mx5)), 65504.0) : saturate(e + d);
+        }
     } else {
         float3 b = Src.SampleLevel(LinearClampSampler, uv + float2(0.0, -Radius) / size, 0).rgb;
         float3 d = Src.SampleLevel(LinearClampSampler, uv + float2(-Radius, 0.0) / size, 0).rgb;
@@ -360,13 +458,41 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         const float hitMin = mn4 / max(4.0 * mx4, 1.0e-5);
         const float hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, -1.0e-5);
         float lobe = max(-hitMin, hitMax);
-        lobe = max(-kRcasLimit, min(lobe, 0.0)) * Sharpness;
+        // phase 104: the lobe stays within AMD's limit (the formula breaks below -0.25), so it scales with min(S, 1); above 1
+        // the change is extrapolated instead (c = e + S * (c1 - e)). min(S, 1) = S for S <= 1: bit-identical to before.
+        lobe = max(-kRcasLimit, min(lobe, 0.0)) * min(Sharpness, 1.0);
         float3 c = (lobe * (b + d + f + g) + e.rgb) / (4.0 * lobe + 1.0);
+        if (Sharpness > 1.0) c = e.rgb + Sharpness * (c - e.rgb);   // phase 104 (shader-uniform branch)
         // v0.5.9 anti-ringing: keep the result inside the range of the 5 taps. With a wide Radius a bright
         // lamp in one ring tap pushed the dark pixels around it below zero (black, flickering halos).
         const float3 mn5 = min(e.rgb, min(min(b, d), min(f, g)));
         const float3 mx5 = max(e.rgb, max(max(b, d), max(f, g)));
-        c = clamp(c, mn5, mx5);
+        if (Rcas2.y > 0.5) {
+            // phase 104 BRIGHTNESS-ONLY: the luma change on all three channels (no coloured fringes). The anti-ringing clamp
+            // runs on the luma (the 5 taps' luma range +- the halo), not per channel: a per-channel clamp would cut the change on
+            // any channel that is flat there (a red sign on black: G and B) and bring the colour fringe back. HDR: the change is
+            // also limited so that every channel stays inside the per-channel HDR guard below (finite expand, no new negative).
+            const float eL = Luma(e.rgb);
+            const float mnL = min(eL, mn4), mxL = max(eL, mx4);
+            const float rL = Rcas2.x * (mxL - mnL);
+            float dY = clamp(Luma(c), mnL - rL, mxL + rL) - eL;
+            if (hdr) {
+                const float3 up = max(mx5, 0.5 * (mx5 + 1.0)) - e.rgb, dn = min(mn5, 0.0) - e.rgb;   // up >= 0 >= dn
+                dY = clamp(dY, Max3(dn), min(up.r, min(up.g, up.b)));
+            }
+            c = e.rgb + dY;
+        } else if (Rcas2.x > 0.0) {
+            // phase 104 HALO LIMIT: measured in VR captures, the tight clamp removed nearly all overshoot -- and the overshoot is
+            // what reads as sharpness (Laplacian energy at 1.0 = 0.028 vs 0.030 with DLAA off). Allow h * the 5-tap range past
+            // either end. HDR (compressed space): the top stops halfway from mx5 to 1 (max3 stays < 1 = finite expand, at most
+            // ~2x the brightest tap's linear value) and the bottom never goes below min(mn5, 0) (no new negative colour).
+            const float3 hr = Rcas2.x * (mx5 - mn5);
+            float3 lo = mn5 - hr, hi = mx5 + hr;
+            if (hdr) { lo = max(lo, min(mn5, 0.0)); hi = min(hi, max(mx5, 0.5 * (mx5 + 1.0))); }
+            c = clamp(c, lo, hi);
+        } else {
+            c = clamp(c, mn5, mx5);
+        }
         res = hdr ? min(HdrExpand(c), 65504.0) : saturate(c);   // v0.8.0 HDR: back to linear, no 0..1 clamp
     }
     if (Blend > 0.5) {
@@ -1197,6 +1323,9 @@ bool SceneDlaa::EnsureDebugCs(ID3D11Device* dev) {
 // v0.5.6: RCAS compute shader (compiled once, kept across resizes) + its constant buffer (strength).
 float SceneDlaa::s_sharpness = 0.4f;     // dlaa.ini sharpness (default 0.4; 0 = off)
 float SceneDlaa::s_sharpRadius = 1.5f;   // v0.5.8 dlaa.ini sharp_radius (default 1.5; clamp 1..4)
+int   SceneDlaa::s_sharpType = SceneDlaa::kSharpRcas;   // phase 101 dlaa.ini sharpen_type (rcas / nis)
+int   SceneDlaa::s_sharpHalo = 0;        // phase 104 dlaa.ini sharp_halo (0..50 %, default 0 = the v0.5.9 clamp)
+bool  SceneDlaa::s_sharpLuma = false;    // phase 104 dlaa.ini sharp_luma (default 0 = per channel)
 int   SceneDlaa::s_biasPct = 100;         // phase 49 dlaa.ini dlss_bias_mask (default 100 %; 0 = off)
 int   SceneDlaa::s_area = 100;           // v0.6.4 dlaa.ini dlaa_area (default 100 = whole image; clamp kAreaMin (10)..100)
 uint32_t SceneDlaa::s_rectMoves = 0;     // phase 91: every unit's rect moves (RectMoves)
@@ -1225,8 +1354,10 @@ bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
         // whenever s_sharpness differs from what this eye last wrote (m_sharpCbVal). v0.5.8: radius too.
         // v0.6.4: 32 bytes (+ feather, blend, edge flags); Run re-uploads whenever any of the 8 floats changed.
         // v0.8.0: + float4 Mode (HDR flag), written by Run before the first dispatch like every other field.
+        // phase 104: + float4 Rcas2 (halo limit, brightness-only), 64 bytes.
         const float cb[kSharpCbFloats] = { s_sharpness, s_sharpRadius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                           0.0f, 0.0f, 0.0f, 0.0f };
+                                           0.0f, 0.0f, 0.0f, 0.0f,
+                                           (float)s_sharpHalo / 100.0f, s_sharpLuma ? 1.0f : 0.0f, 0.0f, 0.0f };
         D3D11_BUFFER_DESC bd{};
         bd.ByteWidth = sizeof(cb);
         bd.Usage = D3D11_USAGE_DYNAMIC;
@@ -1975,7 +2106,9 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         (blend && m_ry + m_h < m_fullH) ? 1.0f : 0.0f,           // bottom
         m_hdr ? 1.0f : 0.0f,                                     // v0.8.0 Mode: HDR unit (compressed-value RCAS)
         oaaIn ? (float)m_rx : 0.0f, oaaIn ? (float)m_ry : 0.0f,  // phase 81: Orig = the outside-AA scratch at the rect origin
-        0.0f };
+        s_sharpType == kSharpNis ? 1.0f : 0.0f,                  // phase 101: Mode.w = NIS sharpen
+        (float)s_sharpHalo / 100.0f, s_sharpLuma ? 1.0f : 0.0f,  // phase 104: Rcas2.x halo limit, .y brightness-only
+        0.0f, 0.0f };
     bool sharpOn = m_sharpRes && (sharpNow > 0.0f || blend);
     if (ok && sharpOn && (!m_sharpCbValid || memcmp(cbNow, m_sharpCbData, sizeof(cbNow)) != 0)) {
         D3D11_MAPPED_SUBRESOURCE mp{};

@@ -213,6 +213,13 @@ int main() {
               BugReport::PackGroup("rw_depth_01.png") == BugReport::kGroupRewind && BugReport::PackGroup("mv_0.bin") == BugReport::kGroupFull &&
               BugReport::PackGroup("ngx_out_1.png") == BugReport::kGroupFull && BugReport::PackGroup("jitonly_0.png") == BugReport::kGroupFull,
               "PackGroup");
+        // phase 110: the census part of a capture (census\ subtree) always goes into the _main zip, whatever the file kind
+        CHECK(BugReport::PackGroup("census/index.txt") == BugReport::kGroupMain &&
+              BugReport::PackGroup("census/tinted.png") == BugReport::kGroupMain &&
+              BugReport::PackGroup("census/9c062880_1a104d6e/tex_t0.dds") == BugReport::kGroupMain &&
+              BugReport::PackGroup("census/9c062880_1a104d6e/ps_cb0.bin") == BugReport::kGroupMain &&
+              BugReport::PackGroup("census/9c062880_1a104d6e/ps.dxbc") == BugReport::kGroupMain,
+              "PackGroup: census/ -> main");
         CHECK(BugReport::PartZipName(L"d/s", BugReport::kGroupMain, 0, 1) == L"d/s_main.zip" &&
               BugReport::PartZipName(L"d/s", BugReport::kGroupRewind, 1, 3) == L"d/s_rewind_part02.zip", "PartZipName");
     }

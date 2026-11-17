@@ -330,6 +330,18 @@ inline void LogImpl(int lvl, const char* fmt, ...) {
 #define LogWarn(...) LogImpl(2, __VA_ARGS__)               // phase 39: degraded but running ("WARN  " in the file)
 #define Log(...)     LogImpl(3, __VA_ARGS__)               // info: one-time state lines (startup, a change, the exit line)
 #define LogDbg(...)  LogImpl(4, __VA_ARGS__)               // phase 39: periodic statistics, verbose tracing, dumps
+#ifdef DLAA_FMT_CHECK
+// phase 109r: a build check only (cl /DDLAA_FMT_CHECK /Zs): every log call also goes through printf in a dead branch, so MSVC's
+// printf format check (C4477 / C4313) sees each format string against its arguments. Never defined in a real build.
+#undef LogErr
+#undef LogWarn
+#undef Log
+#undef LogDbg
+#define LogErr(...)  ((void)(false && printf(__VA_ARGS__)), LogImpl(1, __VA_ARGS__))
+#define LogWarn(...) ((void)(false && printf(__VA_ARGS__)), LogImpl(2, __VA_ARGS__))
+#define Log(...)     ((void)(false && printf(__VA_ARGS__)), LogImpl(3, __VA_ARGS__))
+#define LogDbg(...)  ((void)(false && printf(__VA_ARGS__)), LogImpl(4, __VA_ARGS__))
+#endif
 // phase 39: the current level (0..4; reads dlaa.ini first when nothing has logged yet).
 inline int LogLevel() {
     const int l = LogDetail::S().level.load(std::memory_order_acquire);

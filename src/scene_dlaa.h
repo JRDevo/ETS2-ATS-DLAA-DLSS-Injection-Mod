@@ -265,14 +265,30 @@ public:
     static bool SetDlssPreset(char letter) { return DlaaProcessor::SetRenderPreset(letter); }
     static const char* DlssPresetName() { return DlaaProcessor::RenderPresetName(); }
     static uint32_t DlssPresetFallbacks() { return DlaaProcessor::PresetFallbacks(); }
-    // sharpness 0..1 (RCAS strength after NGX); 0 = pass skipped. v0.5.7: live (Shift+PageUp/PageDown); the
+    // sharpness 0..2 (phase 104; was 0..1) (RCAS strength after NGX); 0 = pass skipped. v0.5.7: live (Shift+PageUp/PageDown); the
     // RCAS texture/shader always exist now, each eye re-uploads its constant buffer when the value changed.
-    static void SetSharpness(float s) { s_sharpness = s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s); }
+    // phase 104: 0..2 (was 0..1). RCAS: the lobe tops out at 1 (AMD's limit), above 1 the change is extrapolated; NIS holds 1.
+    static constexpr float kSharpMax = 2.0f;
+    static void SetSharpness(float s) { s_sharpness = s < 0.0f ? 0.0f : (s > kSharpMax ? kSharpMax : s); }
     static float Sharpness() { return s_sharpness; }
     // v0.5.8 RCAS ring-tap radius in texels, 1..4 (default 1.5). The 4 ring taps are bilinear, so a fractional
     // radius averages two neighbours; live (Ctrl+PageUp/PageDown), each eye re-uploads its CB when it changed.
     static void SetSharpRadius(float r) { s_sharpRadius = r < 1.0f ? 1.0f : (r > 4.0f ? 4.0f : r); }
     static float SharpRadius() { return s_sharpRadius; }
+    // phase 101 (issue #34): which sharpen filter the pass runs -- kSharpRcas (AMD FSR1 RCAS, uses SharpRadius) or kSharpNis
+    // (NVIDIA Image Scaling sharpen-only, fixed 5x5). Live: the constant buffer carries it (Mode.w), re-uploaded on change.
+    enum : int { kSharpRcas = 0, kSharpNis = 1 };
+    static void SetSharpType(int t) { s_sharpType = t == kSharpNis ? kSharpNis : kSharpRcas; }
+    static int SharpType() { return s_sharpType; }
+    static const char* SharpTypeName() { return s_sharpType == kSharpNis ? "nis" : "rcas"; }
+    // phase 104 (RCAS only, live via the constant buffer): halo limit = how far past the 5-tap range the sharpened value may
+    // overshoot, 0..50 % of that range (dlaa.ini sharp_halo, default 0 = the v0.5.9 clamp); brightness-only = the luma
+    // change on all three channels instead of per channel (dlaa.ini sharp_luma, default 0 = per channel as before).
+    static constexpr int kSharpHaloMax = 50;
+    static void SetSharpHalo(int pct) { s_sharpHalo = pct < 0 ? 0 : (pct > kSharpHaloMax ? kSharpHaloMax : pct); }
+    static int SharpHalo() { return s_sharpHalo; }
+    static void SetSharpLuma(bool on) { s_sharpLuma = on; }
+    static bool SharpLuma() { return s_sharpLuma; }
     // v0.8.1: per instance -- true = this unit runs as if the sharpness were 0 (preview units with dlaa.ini
     // preview_sharpen = 0; the RCAS pass is then skipped exactly like at sharpness 0). Default false.
     void SetNoSharpen(bool on) { m_noSharpen = on; }
@@ -490,7 +506,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11SamplerState>        m_sharpSampler; // v0.5.8: linear clamp, bound at s0 for the RCAS dispatch
     // v0.6.4: the floats last written into m_sharpCb (was strength + radius only); re-uploaded on any change.
     // v0.8.0: 8 -> 12 (float4 Mode, x = 1 in an HDR unit; 0 = the LDR shader path exactly as before).
-    static constexpr int                              kSharpCbFloats = 12;
+    static constexpr int                              kSharpCbFloats = 16;   // phase 104: + float4 Rcas2 (was 12)
     float                                             m_sharpCbData[kSharpCbFloats] = {};
     bool                                              m_sharpCbValid = false;
     bool                                              m_sharpRes = false;    // m_sharp* + CS + CB valid for m_w x m_h
@@ -507,6 +523,9 @@ private:
     ID3D11Texture2D*                                  m_intoTex = nullptr;   //   (identity; the RTV holds the reference)
     static float                                      s_sharpness;
     static float                                      s_sharpRadius;  // v0.5.8: RCAS ring-tap radius in texels (1..4)
+    static int                                        s_sharpType;    // phase 101: kSharpRcas / kSharpNis
+    static int                                        s_sharpHalo;    // phase 104: RCAS halo limit, % of the 5-tap range (0..50)
+    static bool                                       s_sharpLuma;    // phase 104: RCAS brightness-only
     static int                                        s_area;         // v0.6.4 dlaa_area (kAreaMin..100; phase 15: 20..100; now 10..100)
     static uint32_t                                   s_rectMoves;    // phase 91: RectMoves()
     static int                                        s_feather;      // v0.6.4 dlaa_area_feather (0..512 px)

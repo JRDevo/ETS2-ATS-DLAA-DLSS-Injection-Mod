@@ -12,6 +12,8 @@
 #include <cmath>
 #include <cstring>
 #include <cwchar>
+#include <mutex>                                    // phase 115r: RenderBug's fit memo
+#include <string>
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
@@ -138,6 +140,10 @@ SRWLOCK                          g_wGraphLock = SRWLOCK_INIT;
 TuningMenu::WidgetGraph          g_wGraph;
 bool                             g_wLastGraphOn = false;
 uint32_t                         g_wLastGraphGen = 0;
+// phase 115: the census BUG ICON under the fps box (VR: SetWidgetBug; "" = none) -- the lines as handed over (under g_wGraphLock) and
+// those of the cached texture
+wchar_t                          g_wBug1[32] = {}, g_wBug2[32] = {}, g_wBug3[32] = {};   // (116: + the "fix is off" line)
+wchar_t                          g_wLastBug1[32] = {}, g_wLastBug2[32] = {}, g_wLastBug3[32] = {};
 uint32_t                         g_wTextH = 0;
 
 constexpr UINT kInst = 256;
@@ -647,6 +653,175 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
     return ok;
 }
 
+// phase 115: the census BUG ICON -- GDI -> out (RGBA, w x h): a dark rounded plate (alpha ~67 %), a bug DRAWN with GDI shapes (no
+// font glyph, no emoji: legs, antennae, a red body with a white rim, a dark head, a back line and spots) on the left in a square as
+// tall as the plate, and two lines right of it: line1 (bold, yellow) "3 to capture", line2 (white) "5 captured", outlined like the
+// fps box. The font shrinks (13 -> 7 reference px) until both lines fit the column, so nothing is cut. Same colour / mask DIB pair as
+// RenderWidget (A = the mask's red). False = GDI failed.
+// phase 116: line3 (null / "" = none) = a small third line under them ("2: fix is off", light grey, kBug3Less px smaller than line 1)
+// in the same box: the three rows share the height in proportion to their fonts, and the fit loop counts all three.
+constexpr float kBug3Less = 2.5f;
+bool RenderBug(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h, std::vector<uint32_t>& out,
+               const wchar_t* line3 = nullptr) {
+    const bool has3 = line3 && line3[0];
+    static std::atomic<bool> s_failLogged{ false };
+    bool failLogged = s_failLogged.load(std::memory_order_relaxed);
+    const float W = (float)w / s, H = (float)h / s;          // reference px
+    auto px = [&](float v) { return (LONG)std::lround(v * s); };
+    const LONG o = std::max<LONG>(1, (LONG)std::lround(1.0f * s));
+    const float ix = 2.0f, iy = 2.0f, is = H - 4.0f;          // the icon square
+    const float tx0 = ix + is + 3.0f, tx1 = W - 3.0f;         // the text column
+    // the font size that fits both lines (measured at this scale). Phase 115r (P5): memoised -- the key is the scale, the size and the
+    // two lines with every digit as '0' (Segoe UI's digits are tabular: "12 to capture" fits as "34 to capture"), so a count change
+    // costs no measuring (up to 12 x 2 font creations before)
+    float fs = 13.0f;
+    struct FitMemo { float s = 0.0f; uint32_t w = 0, h = 0; std::wstring a, b, c; float fs = 0.0f; };
+    static std::mutex s_fitMx;
+    static FitMemo s_fit[4];
+    static unsigned s_fitNext = 0;
+    auto norm = [](const wchar_t* t) {
+        std::wstring r = t ? t : L"";
+        for (wchar_t& c : r) if (c >= L'0' && c <= L'9') c = L'0';
+        return r;
+    };
+    const std::wstring n1 = norm(line1), n2 = norm(line2), n3 = norm(line3);
+    bool memoHit = false;
+    {
+        std::lock_guard<std::mutex> lk(s_fitMx);
+        for (const FitMemo& m : s_fit)
+            if (m.fs > 0.0f && m.s == s && m.w == w && m.h == h && m.a == n1 && m.b == n2 && m.c == n3) { fs = m.fs; memoHit = true; break; }
+    }
+    if (!memoHit) {
+        HDC dc = CreateCompatibleDC(nullptr);
+        for (; dc && fs > 7.0f; fs -= 0.5f) {
+            HFONT fb = MakeFont(fs * s, FW_BOLD, L"Segoe UI"), fn = MakeFont((fs - 1.0f) * s, FW_SEMIBOLD, L"Segoe UI");
+            SIZE a{}, b{};
+            HGDIOBJ old = SelectObject(dc, fb ? fb : GetStockObject(DEFAULT_GUI_FONT));
+            if (line1 && line1[0]) GetTextExtentPoint32W(dc, line1, (int)wcslen(line1), &a);
+            SelectObject(dc, fn ? fn : GetStockObject(DEFAULT_GUI_FONT));
+            if (line2 && line2[0]) GetTextExtentPoint32W(dc, line2, (int)wcslen(line2), &b);
+            SIZE c3{};                                       // phase 116: the third line (its own smaller font)
+            HFONT f3 = has3 ? MakeFont((fs - kBug3Less) * s, FW_SEMIBOLD, L"Segoe UI") : nullptr;
+            if (has3) {
+                SelectObject(dc, f3 ? f3 : GetStockObject(DEFAULT_GUI_FONT));
+                GetTextExtentPoint32W(dc, line3, (int)wcslen(line3), &c3);
+            }
+            SelectObject(dc, old);
+            if (fb) DeleteObject(fb);
+            if (fn) DeleteObject(fn);
+            if (f3) DeleteObject(f3);
+            const float need = (float)(std::max)((std::max)(a.cx, b.cx), c3.cx) / s + 2.0f;
+            const float tall = has3 ? 3.0f * fs - 1.0f - kBug3Less : 2.0f * fs;
+            if (need <= tx1 - tx0 && tall <= H + 2.0f) break;
+        }
+        if (dc) DeleteDC(dc);
+        if (dc) {
+            std::lock_guard<std::mutex> lk(s_fitMx);
+            s_fit[s_fitNext++ & 3u] = FitMemo{ s, w, h, n1, n2, n3, fs };
+        }
+    }
+    HFONT fBig = MakeFont(fs * s, FW_BOLD, L"Segoe UI"), fSmall = MakeFont((fs - 1.0f) * s, FW_SEMIBOLD, L"Segoe UI");
+    HFONT fTiny = has3 ? MakeFont((fs - kBug3Less) * s, FW_SEMIBOLD, L"Segoe UI") : nullptr;   // phase 116
+    HFONT stock = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    auto pick = [&](HFONT f) { return f ? f : stock; };
+    std::vector<uint32_t> maskPx;
+    auto paint = [&](bool mask, std::vector<uint32_t>& dst) -> bool {
+        Dib d;
+        if (!DibBegin(d, w, h, "bug icon", failLogged)) return false;
+        HDC dc = d.dc;
+        HGDIOBJ oldFont = SelectObject(dc, pick(fBig));
+        SetBkMode(dc, TRANSPARENT);
+        auto brush = [&](COLORREF c, COLORREF m) { return CreateSolidBrush(mask ? m : c); };
+        auto pen = [&](COLORREF c, float wd) { return CreatePen(PS_SOLID, std::max<int>(1, (int)std::lround(wd * s)), mask ? RGB(255, 255, 255) : c); };
+        // the plate
+        {
+            HBRUSH b = brush(RGB(16, 16, 20), RGB(170, 170, 170));
+            HGDIOBJ ob = SelectObject(dc, b), op = SelectObject(dc, GetStockObject(NULL_PEN));
+            RoundRect(dc, 0, 0, (int)w + 1, (int)h + 1, px(7.0f), px(7.0f));
+            SelectObject(dc, ob); SelectObject(dc, op);
+            DeleteObject(b);
+        }
+        // the bug (u, v in 0..1 of the icon square)
+        auto X = [&](float u) { return (int)std::lround((ix + u * is) * s); };
+        auto Y = [&](float v) { return (int)std::lround((iy + v * is) * s); };
+        auto seg = [&](float u0, float v0, float u1, float v1) { MoveToEx(dc, X(u0), Y(v0), nullptr); LineTo(dc, X(u1), Y(v1)); };
+        {
+            HPEN lp = pen(RGB(235, 235, 235), 1.6f);
+            HGDIOBJ op = SelectObject(dc, lp);
+            const float legs[3][4] = { { 0.33f, 0.50f, 0.06f, 0.36f }, { 0.30f, 0.66f, 0.03f, 0.66f }, { 0.33f, 0.82f, 0.07f, 0.97f } };
+            for (const auto& l : legs) { seg(l[0], l[1], l[2], l[3]); seg(1.0f - l[0], l[1], 1.0f - l[2], l[3]); }
+            seg(0.44f, 0.22f, 0.30f, 0.03f); seg(0.56f, 0.22f, 0.70f, 0.03f);   // antennae
+            SelectObject(dc, op);
+            DeleteObject(lp);
+        }
+        {
+            HPEN rim = pen(RGB(255, 255, 255), 1.2f);
+            HBRUSH body = brush(RGB(232, 36, 28), RGB(255, 255, 255));
+            HGDIOBJ op = SelectObject(dc, rim), ob = SelectObject(dc, body);
+            Ellipse(dc, X(0.27f), Y(0.34f), X(0.73f), Y(0.99f));
+            SelectObject(dc, ob);
+            DeleteObject(body);
+            HBRUSH head = brush(RGB(40, 40, 44), RGB(255, 255, 255));
+            ob = SelectObject(dc, head);
+            Ellipse(dc, X(0.36f), Y(0.15f), X(0.64f), Y(0.41f));
+            SelectObject(dc, ob); SelectObject(dc, op);
+            DeleteObject(head);
+            DeleteObject(rim);
+            if (!mask) {                                     // the back line + the spots (inside the body: the mask is white there already)
+                HPEN bl = CreatePen(PS_SOLID, std::max<int>(1, (int)std::lround(1.1f * s)), RGB(20, 20, 20));
+                HBRUSH sp = CreateSolidBrush(RGB(20, 20, 20));
+                op = SelectObject(dc, bl);
+                seg(0.5f, 0.42f, 0.5f, 0.97f);
+                ob = SelectObject(dc, sp);
+                HGDIOBJ np = SelectObject(dc, GetStockObject(NULL_PEN));
+                const float spots[4][2] = { { 0.39f, 0.58f }, { 0.61f, 0.58f }, { 0.39f, 0.80f }, { 0.61f, 0.80f } };
+                for (const auto& p : spots) Ellipse(dc, X(p[0] - 0.055f), Y(p[1] - 0.055f), X(p[0] + 0.055f), Y(p[1] + 0.055f));
+                SelectObject(dc, np); SelectObject(dc, ob); SelectObject(dc, op);
+                DeleteObject(sp);
+                DeleteObject(bl);
+            }
+        }
+        // the two lines, outlined like the fps box
+        auto line = [&](HFONT f, const wchar_t* t, float y0, float y1, COLORREF col) {
+            if (!t || !t[0]) return;
+            SelectObject(dc, pick(f));
+            const UINT fl = DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX;
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : RGB(8, 8, 8));
+            for (LONG dy = -o; dy <= o; dy += o)
+                for (LONG dx = -o; dx <= o; dx += o) {
+                    if (!dx && !dy) continue;
+                    RECT r{ px(tx0) + dx, px(y0) + dy, px(tx1) + dx, px(y1) + dy };
+                    DrawTextW(dc, t, -1, &r, fl);
+                }
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : col);
+            RECT r{ px(tx0), px(y0), px(tx1), px(y1) };
+            DrawTextW(dc, t, -1, &r, fl);
+        };
+        if (!has3) {
+            line(fBig, line1, 1.0f, 0.5f * H + 0.5f, RGB(255, 222, 0));
+            line(fSmall, line2, 0.5f * H - 0.5f, H - 1.0f, RGB(255, 255, 255));
+        } else {                                             // phase 116: three rows, heights in proportion to their fonts
+            const float f1 = fs, f2 = fs - 1.0f, f3 = fs - kBug3Less, k = (H - 2.0f) / (f1 + f2 + f3);
+            const float y1 = 1.0f + f1 * k, y2 = y1 + f2 * k;
+            line(fBig, line1, 1.0f, y1 + 0.5f, RGB(255, 222, 0));
+            line(fSmall, line2, y1 - 0.5f, y2 + 0.5f, RGB(255, 255, 255));
+            line(fTiny, line3, y2 - 0.5f, H - 1.0f, RGB(190, 200, 210));
+        }
+        SelectObject(dc, oldFont);
+        DibFinish(d, w, h, dst);
+        return true;
+    };
+    const bool ok = paint(false, out) && paint(true, maskPx) && maskPx.size() == out.size();
+    if (failLogged) s_failLogged.store(true, std::memory_order_relaxed);
+    if (ok)
+        for (size_t i = 0, e = out.size(); i < e; ++i)
+            out[i] = (out[i] & 0x00FFFFFFu) | ((maskPx[i] & 0xFFu) << 24);
+    if (fBig) DeleteObject(fBig);
+    if (fSmall) DeleteObject(fSmall);
+    if (fTiny) DeleteObject(fTiny);
+    return ok;
+}
+
 // (Re)creates `tex` / `srv` as a w x h R8G8B8A8_UNORM texture when the size changed, then uploads `px`. False = create failed.
 bool UploadTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, ComPtr<ID3D11Texture2D>& tex, ComPtr<ID3D11ShaderResourceView>& srv,
                    uint32_t& texW, uint32_t& texH, uint32_t w, uint32_t h, const std::vector<uint32_t>& px, const char* what) {
@@ -740,22 +915,28 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     CopyLine(l1, line1);
     CopyLine(l2, line2);
     static TuningMenu::WidgetGraph s_g;                      // (render thread only; 190 bytes)
+    wchar_t b1[32], b2[32], b3[32];                          // phase 115: the bug icon strip under it (VR); 116: + line 3
     AcquireSRWLockShared(&g_wGraphLock);
     s_g = g_wGraph;
+    wcscpy_s(b1, g_wBug1); wcscpy_s(b2, g_wBug2); wcscpy_s(b3, g_wBug3);
     ReleaseSRWLockShared(&g_wGraphLock);
+    const bool bugOn = b1[0] || b2[0];
     const bool same = g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2) &&
-        g_wLastText == g_wText && g_wLastLine == g_wLine && g_wLastGraphOn == s_g.on;   // phase 44: + the colours; 88: + graph on
+        g_wLastText == g_wText && g_wLastLine == g_wLine && g_wLastGraphOn == s_g.on &&   // phase 44: + the colours; 88: + graph on
+        !wcscmp(b1, g_wLastBug1) && !wcscmp(b2, g_wLastBug2) && !wcscmp(b3, g_wLastBug3);   // phase 115: + the bug lines
     if (same && (!s_g.on || s_g.gen == g_wLastGraphGen)) return true;
-    // phase 88: the text block as tall as its lines (graph on), the strip right under it
+    // phase 88: the text block as tall as its lines (graph on), the strip right under it; phase 115: the bug strip under both
     const float refT = TuningMenu::WidgetTextRefH(l1, l2, s_g.on);
     const uint32_t w = (uint32_t)std::lround(TuningMenu::kWidgetRefW * buildScale);
     const uint32_t ht = (uint32_t)std::lround(refT * buildScale);
-    const uint32_t h = s_g.on ? (uint32_t)std::lround((refT + TuningMenu::kWidgetGraphH) * buildScale) : ht;
-    if (w < 8 || h < 8 || w > 4096 || h > 4096) return false;
+    const uint32_t hg = s_g.on ? (uint32_t)std::lround((refT + TuningMenu::kWidgetGraphH) * buildScale) : ht;
+    const uint32_t h = bugOn ? (uint32_t)std::lround((refT + (s_g.on ? TuningMenu::kWidgetGraphH : 0.0f) + TuningMenu::kWidgetBugH) *
+                                                     buildScale) : hg;
+    if (w < 8 || h < 8 || w > 4096 || h > 4096 || hg > h) return false;
     if (same && g_wTextH == ht && g_wTexH == h && g_wPixels.size() == (size_t)w * h) {   // phase 88: only a new column
         uint32_t* const strip = g_wPixels.data() + (size_t)w * ht;
-        PaintGraph(strip, w, h - ht, buildScale, s_g);
-        const D3D11_BOX box{ 0, ht, 0, w, h, 1 };
+        PaintGraph(strip, w, hg - ht, buildScale, s_g);
+        const D3D11_BOX box{ 0, ht, 0, w, hg, 1 };
         ctx->UpdateSubresource(g_wTex.Get(), 0, &box, strip, w * 4u, 0);
         g_wLastGraphGen = s_g.gen;
         return true;
@@ -764,7 +945,12 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     else if (!RenderWidget(l1, l2, buildScale, w, ht, s_g.on, g_wPixels, g_wText, g_wLine)) return false;
     if (h > ht) {
         g_wPixels.resize((size_t)w * h);
-        PaintGraph(g_wPixels.data() + (size_t)w * ht, w, h - ht, buildScale, s_g);
+        if (hg > ht) PaintGraph(g_wPixels.data() + (size_t)w * ht, w, hg - ht, buildScale, s_g);
+    }
+    if (h > hg) {                                            // phase 115: the bug icon strip
+        std::vector<uint32_t> bug;
+        if (!RenderBug(b1, b2, buildScale, w, h - hg, bug, b3) || bug.size() != (size_t)w * (h - hg)) return false;
+        std::copy(bug.begin(), bug.end(), g_wPixels.begin() + (size_t)w * hg);
     }
     if (!UploadTexture(dev, ctx, g_wTex, g_wSrv, g_wTexW, g_wTexH, w, h, g_wPixels, "fps box")) return false;
     g_wBuild = buildScale;
@@ -774,6 +960,7 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     g_wLastLine = g_wLine;
     g_wLastGraphOn = s_g.on;
     g_wLastGraphGen = s_g.gen;
+    wcscpy_s(g_wLastBug1, b1); wcscpy_s(g_wLastBug2, b2); wcscpy_s(g_wLastBug3, b3);
     g_wTextH = ht;
     g_wHave = true;
     return true;
@@ -999,6 +1186,176 @@ bool DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t 
     return true;
 }
 
+// phase 112b: the census legend. Phase 113 reference layout (scale 1): kLgPad all round; the title (bold 16 px) in a kLgTitleH row;
+// kLgGap; one kLgLineH row per plain line (14 px, white); kLgKeyGap; the colour-key row (kLgKeyH): per entry a kLgSw square swatch,
+// kLgSwGap, its word (bold 13 px, in its colour), kLgKeySep to the next entry. The width = the widest of title / lines / key row,
+// MEASURED at the build scale (GDI's hinting widens small text, so the box is sized from the very glyphs it draws: nothing is cut at
+// any scale). Background RGB 16, 17, 20 at kLgBgA / 255.
+namespace {
+constexpr float kLgPad = 10.0f, kLgTitleH = 24.0f, kLgGap = 4.0f, kLgLineH = 20.0f, kLgSw = 10.0f, kLgSwGap = 4.0f,
+                kLgKeySep = 14.0f, kLgKeyGap = 6.0f, kLgKeyH = 19.0f;
+constexpr uint32_t kLgBgA = 192;
+struct LegendFonts {
+    HFONT title = nullptr, word = nullptr, text = nullptr;
+    explicit LegendFonts(float s) : title(MakeFont(16.0f * s, FW_BOLD)), word(MakeFont(13.0f * s, FW_BOLD)),
+                                    text(MakeFont(14.0f * s, FW_NORMAL)) {}
+    ~LegendFonts() { for (HFONT f : { title, word, text }) if (f) DeleteObject(f); }
+    bool ok() const { return title && word && text; }
+};
+int LegendKeys(const TuningMenu::Legend& lg) { return lg.n < 0 ? 0 : (lg.n > TuningMenu::kLegendLines ? TuningMenu::kLegendLines : lg.n); }
+int LegendText(const TuningMenu::Legend& lg) {
+    int n = 0;
+    for (int i = 0; i < TuningMenu::kLegendText; ++i) n += lg.line[i][0] ? 1 : 0;
+    return n;
+}
+float LegendRefH(const TuningMenu::Legend& lg) {
+    return 2.0f * kLgPad + kLgTitleH + kLgGap + kLgLineH * (float)LegendText(lg) + (LegendKeys(lg) ? kLgKeyGap + kLgKeyH : 0.0f);
+}
+// device px of `t` in font f (0 = empty / GDI failed)
+LONG TextW(HDC dc, HFONT f, const wchar_t* t) {
+    if (!t || !t[0] || !f) return 0;
+    SelectObject(dc, f);
+    SIZE z{};
+    return GetTextExtentPoint32W(dc, t, (int)wcsnlen(t, 256), &z) ? z.cx : 0;
+}
+// the widths at scale s (device px): each key word (wordPx[], for the row's layout) and the whole box (reference px, rounded up)
+bool LegendMeasure(const TuningMenu::Legend& lg, float s, const LegendFonts& f, float* wordPx, float* refW) {
+    HDC dc = CreateCompatibleDC(nullptr);
+    if (!dc) return false;
+    HGDIOBJ old = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+    LONG other = TextW(dc, f.title, lg.title);
+    for (int i = 0; i < TuningMenu::kLegendText; ++i) other = (std::max)(other, TextW(dc, f.text, lg.line[i]));
+    float row = 0.0f;
+    for (int i = 0; i < LegendKeys(lg); ++i) {
+        wordPx[i] = (float)TextW(dc, f.word, lg.word[i]);
+        row += (kLgSw + kLgSwGap) * s + wordPx[i] + (i + 1 < LegendKeys(lg) ? kLgKeySep * s : 0.0f);
+    }
+    SelectObject(dc, old);
+    DeleteDC(dc);
+    *refW = std::ceil(((std::max)(row, (float)other) + 2.0f * s) / s + 2.0f * kLgPad);   // (+2 px: the last glyph's overhang)
+    return true;
+}
+// GDI -> out (RGBA, w x h): the colour pass on the background, the coverage pass (text + swatches white on black) -> alpha
+bool RenderLegend(const TuningMenu::Legend& lg, float s, uint32_t w, uint32_t h, const float* wordPx, std::vector<uint32_t>& out) {
+    static std::atomic<bool> s_failLogged{ false };
+    bool failLogged = s_failLogged.load(std::memory_order_relaxed);
+    LegendFonts f(s);
+    if (!f.ok()) return false;
+    auto px = [&](float v) { return (LONG)std::lround(v * s); };
+    const COLORREF bg = RGB(16, 17, 20), white = RGB(240, 240, 240);
+    std::vector<uint32_t> maskPx;
+    auto paint = [&](bool mask, std::vector<uint32_t>& dst) -> bool {
+        Dib d;
+        if (!DibBegin(d, w, h, "census legend", failLogged)) return false;
+        HDC dc = d.dc;
+        if (!mask) {
+            HBRUSH b = CreateSolidBrush(bg);
+            RECT all{ 0, 0, (LONG)w, (LONG)h };
+            if (b) { FillRect(dc, &all, b); DeleteObject(b); }
+        }
+        HGDIOBJ oldFont = SelectObject(dc, f.text);
+        SetBkMode(dc, TRANSPARENT);
+        const UINT fl = DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX;
+        auto text = [&](HFONT fo, COLORREF c, const wchar_t* t, LONG x0, float y0, float y1) {
+            if (!t || !t[0]) return;
+            SelectObject(dc, fo);
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : c);
+            RECT r{ x0, px(y0), (LONG)w, px(y1) };
+            DrawTextW(dc, t, -1, &r, fl);
+        };
+        const LONG x0 = px(kLgPad);
+        float y = kLgPad;
+        text(f.title, white, lg.title, x0, y, y + kLgTitleH);
+        y += kLgTitleH + kLgGap;
+        for (int i = 0; i < TuningMenu::kLegendText; ++i) {
+            if (!lg.line[i][0]) continue;
+            text(f.text, white, lg.line[i], x0, y, y + kLgLineH);
+            y += kLgLineH;
+        }
+        if (LegendKeys(lg)) {
+            y += kLgKeyGap;
+            float x = (float)x0;
+            for (int i = 0; i < LegendKeys(lg); ++i) {
+                const COLORREF c = (COLORREF)(lg.rgb[i] & 0xFFFFFFu);
+                const float sy = y + 0.5f * (kLgKeyH - kLgSw);
+                RECT sw{ (LONG)std::lround(x), px(sy), (LONG)std::lround(x) + px(kLgSw), px(sy) + px(kLgSw) };
+                HBRUSH b = CreateSolidBrush(mask ? RGB(255, 255, 255) : c);
+                if (b) { FillRect(dc, &sw, b); DeleteObject(b); }
+                x += (kLgSw + kLgSwGap) * s;
+                text(f.word, c, lg.word[i], (LONG)std::lround(x), y, y + kLgKeyH);
+                x += wordPx[i] + kLgKeySep * s;
+            }
+        }
+        SelectObject(dc, oldFont);
+        DibFinish(d, w, h, dst);
+        return true;
+    };
+    const bool ok = paint(false, out) && paint(true, maskPx) && maskPx.size() == out.size();
+    if (failLogged) s_failLogged.store(true, std::memory_order_relaxed);
+    if (ok)
+        for (size_t i = 0, e = out.size(); i < e; ++i) {
+            const uint32_t m = maskPx[i] & 0xFFu;
+            out[i] = (out[i] & 0x00FFFFFFu) | ((kLgBgA + (255u - kLgBgA) * m / 255u) << 24);
+        }
+    return ok;
+}
+struct LegendSlot {
+    ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11ShaderResourceView> srv; uint32_t texW = 0, texH = 0;
+    float build = 0.0f; bool have = false; TuningMenu::Legend last{}; std::vector<uint32_t> px;
+    const ID3D11Device* dev = nullptr;               // the device the texture belongs to (a new one: rebuilt)
+};
+LegendSlot g_legendSlot[TuningMenu::kStatusSlots];
+}  // namespace
+
+bool LegendRefSize(const Legend& lg, float* w, float* h) {
+    constexpr float s = 2.0f;
+    LegendFonts f(s);
+    float col[TuningMenu::kLegendLines] = {}, rw = 0.0f;
+    if (!f.ok() || !LegendMeasure(lg, s, f, col, &rw)) return false;
+    if (w) *w = rw;
+    if (h) *h = LegendRefH(lg);
+    return true;
+}
+
+bool DrawLegend(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x, float y, float ax,
+                float ay, float scale, float buildScale, float maxW, float maxH, int outMode, const Legend& lg, int slot,
+                float* drawnH) {
+    if (!ctx || !rtv || !rtW || !rtH || !(scale > 0.0f) || !(buildScale > 0.0f) || slot < 0 || slot >= kStatusSlots) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    LegendSlot& c = g_legendSlot[slot];
+    if (!c.tex || !c.have || c.dev != dev.Get() || std::fabs(c.build - buildScale) > 0.001f || memcmp(&c.last, &lg, sizeof(lg))) {
+        if (c.dev != dev.Get()) { c.tex.Reset(); c.srv.Reset(); c.texW = c.texH = 0; }
+        LegendFonts f(buildScale);
+        float col[TuningMenu::kLegendLines] = {}, rw = 0.0f;
+        if (!f.ok() || !LegendMeasure(lg, buildScale, f, col, &rw)) return false;
+        const uint32_t w = (uint32_t)std::lround(rw * buildScale), h = (uint32_t)std::lround(LegendRefH(lg) * buildScale);
+        if (w < 8 || h < 8 || w > 8192 || h > 4096) return false;
+        if (!RenderLegend(lg, buildScale, w, h, col, c.px) ||
+            !UploadTexture(dev.Get(), ctx, c.tex, c.srv, c.texW, c.texH, w, h, c.px, "census legend")) {
+            c.tex.Reset(); c.srv.Reset(); c.texW = c.texH = 0; c.have = false;   // (the next call tries again)
+            return false;
+        }
+        c.build = buildScale;
+        c.last = lg;
+        c.have = true;
+        c.dev = dev.Get();
+    }
+    float k = scale / c.build;
+    float dw = (float)c.texW * k, dh = (float)c.texH * k;
+    if (maxW > 0.0f && dw > maxW) { const float r = maxW / dw; k *= r; dw *= r; dh *= r; }
+    if (maxH > 0.0f && dh > maxH) { const float r = maxH / dh; k *= r; dw *= r; dh *= r; }
+    float x0 = x - ax * dw, y0 = y - ay * dh;
+    if (x0 > (float)rtW - dw) x0 = (float)rtW - dw;      // kept inside the target
+    if (y0 > (float)rtH - dh) y0 = (float)rtH - dh;
+    if (x0 < 0.0f) x0 = 0.0f;
+    if (y0 < 0.0f) y0 = 0.0f;
+    DrawQuad(ctx, rtv, rtW, rtH, x0, y0, dw, dh, outMode, c.srv.Get(), true, 1.0f);
+    if (drawnH) *drawnH = dh;
+    return true;
+}
+
 // phase 44: the fps box turned (fps_vr_yaw / pitch / roll) in the drawn-in VR fallback -- DrawCorners with the box's texture.
 bool DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
                        float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2) {
@@ -1066,6 +1423,60 @@ void SetWidgetGraph(const WidgetGraph& g) {                  // phase 88
     ReleaseSRWLockExclusive(&g_wGraphLock);
 }
 
+// phase 115: the bug icon box (flat; the VR eyes when the fps box is off) -- own cache per slot (kStatusEyes / kStatusFlat), rebuilt
+// when a line or the build scale changes (the count changes at most twice a second).
+namespace {
+struct BugSlot {
+    ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11ShaderResourceView> srv; uint32_t texW = 0, texH = 0;
+    float build = 0.0f; wchar_t last1[32] = {}, last2[32] = {}, last3[32] = {}; std::vector<uint32_t> px;
+};
+BugSlot g_bug[TuningMenu::kStatusSlots];
+}
+bool DrawBug(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
+             float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2, int slot, const wchar_t* line3) {
+    if (!ctx || !rtv || !rtW || !rtH || !(scale > 0.0f) || !(buildScale > 0.0f) || slot < 0 || slot >= kStatusSlots) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    BugSlot& c = g_bug[slot];
+    wchar_t l1[32], l2[32], l3[32];
+    wcsncpy_s(l1, line1 ? line1 : L"", _TRUNCATE);
+    wcsncpy_s(l2, line2 ? line2 : L"", _TRUNCATE);
+    wcsncpy_s(l3, line3 ? line3 : L"", _TRUNCATE);
+    if (!c.tex || std::fabs(c.build - buildScale) > 0.001f || wcscmp(l1, c.last1) || wcscmp(l2, c.last2) || wcscmp(l3, c.last3)) {
+        const uint32_t w = (uint32_t)std::lround(kBugRefW * buildScale), h = (uint32_t)std::lround(kBugRefH * buildScale);
+        if (w < 8 || h < 8 || w > 8192 || h > 4096) return false;
+        if (!RenderBug(l1, l2, buildScale, w, h, c.px, l3) || !UploadTexture(dev.Get(), ctx, c.tex, c.srv, c.texW, c.texH, w, h, c.px, "bug icon")) {
+            c.tex.Reset(); c.srv.Reset(); c.texW = c.texH = 0;
+            return false;
+        }
+        c.build = buildScale;
+        wcscpy_s(c.last1, l1); wcscpy_s(c.last2, l2); wcscpy_s(c.last3, l3);
+    }
+    const float k = scale / c.build;
+    DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)c.texW * k, (float)c.texH * k, outMode, c.srv.Get(), true, 1.0f);
+    return true;
+}
+bool RenderBugPng(const wchar_t* line1, const wchar_t* line2, float scale, bool inWidget, std::vector<uint32_t>& out, uint32_t* w,
+                  uint32_t* h, const wchar_t* line3) {
+    *w = (uint32_t)std::lround((inWidget ? kWidgetRefW : kBugRefW) * scale);
+    *h = (uint32_t)std::lround((inWidget ? kWidgetBugH : kBugRefH) * scale);
+    return *w >= 8 && *h >= 8 && RenderBug(line1, line2, scale, *w, *h, out, line3);
+}
+void SetWidgetBug(const wchar_t* line1, const wchar_t* line2, const wchar_t* line3) {
+    AcquireSRWLockExclusive(&g_wGraphLock);
+    wcsncpy_s(g_wBug1, line1 ? line1 : L"", _TRUNCATE);
+    wcsncpy_s(g_wBug2, line2 ? line2 : L"", _TRUNCATE);
+    wcsncpy_s(g_wBug3, line3 ? line3 : L"", _TRUNCATE);
+    ReleaseSRWLockExclusive(&g_wGraphLock);
+}
+bool WidgetBugOn() {
+    AcquireSRWLockShared(&g_wGraphLock);
+    const bool on = g_wBug1[0] || g_wBug2[0];
+    ReleaseSRWLockShared(&g_wGraphLock);
+    return on;
+}
+
 float WidgetTextRefH(const wchar_t* line1, const wchar_t* line2, bool graphOn) {
     if (!graphOn) return kWidgetRefH;                        // (no graph: the box keeps its size, one line centred)
     const int n = (line1 && line1[0] ? 1 : 0) + (line2 && line2[0] ? 1 : 0);
@@ -1075,8 +1486,9 @@ float WidgetTextRefH(const wchar_t* line1, const wchar_t* line2, bool graphOn) {
 float WidgetRefH(const wchar_t* line1, const wchar_t* line2) {
     AcquireSRWLockShared(&g_wGraphLock);
     const bool on = g_wGraph.on;
+    const bool bug = g_wBug1[0] || g_wBug2[0];               // phase 115: the bug icon strip (VR)
     ReleaseSRWLockShared(&g_wGraphLock);
-    return WidgetTextRefH(line1, line2, on) + (on ? kWidgetGraphH : 0.0f);
+    return WidgetTextRefH(line1, line2, on) + (on ? kWidgetGraphH : 0.0f) + (bug ? kWidgetBugH : 0.0f);
 }
 
 void ReleaseWidget() {

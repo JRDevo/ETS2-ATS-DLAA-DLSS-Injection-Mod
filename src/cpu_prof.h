@@ -80,6 +80,7 @@ enum Cat : uint8_t {
     kBFwBoundary,          // RefreshBackbufferFromSwapchain / LayerBackbufferAtBoundary + OnPresentBoundary
     kBFwTicks,             // VrUiTick, TraceAtPresent, CaptureAtPresent, CheckPresetFallback, FpsTick, MenuKeys, FpsProfileTick
     kBFwLate,              // MenuLateAtPresent (the VR late panel's finished eye pictures)
+    kBShadowLock,          // phase 103: own-vehicle shadow grid lock (ring scans at Unmap, slice pairing, light-draw copy bind, forward patches)
     kModEnd,
     // ---- outside the mod: the game's own call inside each hook ----
     kDrvFirst = kModEnd,
@@ -103,7 +104,8 @@ inline const char* Name(int c) {
         "xrBeginFrame", "xrEndFrame", "xrAcquire", "xrRelease", "xrLocateViews", "xrOther", "StateSet",
         "blit", "dlaa-run", "ngx-eval", "mv-gen", "did-rec", "did-replay", "fwd-depth", "mv-collect", "obj-ids", "snapshot",
         "lod", "frame-end", "mirror", "menu", "preview", "frame-work", "keys", "gpu-timers", "log", "prof", "vrs", "hmask",
-        "fw-overlay", "fw-menudraw", "fw-boundary", "fw-ticks", "fw-late" };   // (phase 91)
+        "fw-overlay", "fw-menudraw", "fw-boundary", "fw-ticks", "fw-late",    // (phase 91)
+        "shadow-lock" };                                                       // (phase 103)
     if (c < 0 || c >= kCount) return "?";
     return c < kModEnd ? kN[c] : kN[c - kDrvFirst];
 }
@@ -144,6 +146,19 @@ struct Tls {
     uint64_t frameModAt;         // `mod` at the last frame mark
     uint32_t winSeen;            // g_winSeq at the last frame mark
     uint32_t onSeen;             // phase 39: g_onSeq at the last frame mark (a live switch-on drops the stale frame start)
+    // ---- phase 103b WORST-FRAME BREAKDOWN: which mod rows made one frame expensive ----
+    uint64_t rowAt[kModEnd];     // (owner) ticks[c] / calls[c] at the last frame mark: this frame's per-row time = the difference
+    uint64_t callAt[kModEnd];
+    static constexpr int kTop = 6;
+    struct Worst {               // the window's worst frame (owner writes under worstSeq: odd = being written; the reporter reads)
+        uint8_t  cat[kTop];
+        uint32_t calls[kTop];
+        uint64_t ticks[kTop];
+        uint64_t mod, frame, present;
+        uint32_t flags;
+        int      n;
+    } worst;
+    std::atomic<uint32_t> worstSeq;
 };
 
 inline std::atomic<bool>      g_on{false};

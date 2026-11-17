@@ -4,7 +4,11 @@
 //
 //   menu_shot.exe <output dir>      writes tuning-menu.png (flat), tuning-menu-vr.png (VR),
 //                                   tuning-menu-all-open.png (flat, every row), tuning-menu-all-open-vr.png (VR, every row),
-//                                   tuning-menu-vr-performance.png, tuning-menu-picture.png, tuning-menu-hotkeys.png,
+//                                   tuning-menu-vr-performance.png, tuning-menu-picture.png (Picture fixes Standard),
+//                                   tuning-menu-picture-custom.png (phase 112: Custom, its fix rows), tuning-menu-bug-report.png (phase 110),
+//                                   phase 112c: tuning-menu-vr-performance-custom.png, tuning-menu-panel.png, tuning-menu-panel-custom.png
+//                                   (each preset group in Recommended and Custom), census-legend*.png (112b),
+//                                   tuning-menu-hotkeys.png,
 //                                   fps-counter.png (with the history graph), fps-counter-colours.png; exit 0 = all written.
 //
 // THE DATA is ONE table (kRows, below) that mirrors MenuRowId / MenuBuildPanel / kMenuDesc / kMenuGroups / MenuRowMode in
@@ -27,6 +31,9 @@
 #include "shader_cache.h"
 #include "fps_pose.h"
 #include "lang.h"                                  // phase 74: --lang renders the menu in a language
+#include "census_legend.h"                         // phase 112b: the census colour legend's text
+#include "census_paint.h"                          // phase 115: the census checkerboard (census-checker*.png)
+#include <d3dcompiler.h>
 
 using TuningMenu::kInkCpu; using TuningMenu::kInkGpu; using TuningMenu::kInkEnd;
 
@@ -51,7 +58,10 @@ struct E {
     const wchar_t* costFlat;   // flat cost column (null = same as cost)
     const wchar_t* desc;       // the description (kMenuDesc) -- only the rows a shot selects need one
     const wchar_t* sent;       // the live cost sentence MenuPerfCosts appends
+    bool custom;               // phase 112: a Picture fix row -- shown only in the Custom shot (Picture fixes = Custom), and in the
+                               //   all-open shots (every row of the mode)
 };
+static bool g_custom = false;  // phase 112: the shot shows the presets = Custom (their detail rows listed; 112c: every preset)
 // phase 84 / 89d: the groups as the player sees them (kMenuGroups order). Performance + In-game UI are VR-only (their header rows
 // carry M_V, so they are hidden in the flat shots, as MenuHeaderHasRows hides them when all their rows are of the other mode).
 static const wchar_t* const kGroups[] = { L"Picture", L"Motion and mirrors", L"Frame rate", L"Performance", L"In-game UI",
@@ -68,17 +78,45 @@ static const E kRows[] = {
     { -1, false, M_B, false, L"DLAA model", L"2 (E)", nullptr, L"Shift+F1 .. Shift+F4", nullptr, L"<c>0.12</> | <g>1.2</>", L"<c>0.10</> | <g>0.6</>", nullptr, nullptr },
     // ---- Picture ----
     { G_PIC, true, M_B, false, L"Picture", L"", nullptr, L"", nullptr, L"", nullptr,
-      L"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and the DLAA area. Right opens "
+      L"Picture quality: the Picture preset (all the fixes), the Sharpen preset, texture sharpness and the DLAA area. Right opens "
       L"the group, Left closes it; it starts closed every time the menu opens.", nullptr },
+    // phase 112 / 112c: Picture preset (Recommended / Off / Custom) and its fix rows (shown with Custom only; inject.cpp MR_PICFIX ..
+    // MR_FXCUTOUT, + MR_FWD since 112c)
+    { G_PIC, false, M_B, false, L"Picture preset", L"Recommended", nullptr, L"Ctrl+Shift+F7", nullptr, L"", nullptr,
+      L"All the mod's fixes against flicker, trails and shimmer in one switch. Recommended = the tested fixes on (default). Off = "
+      L"all of them off, live: compare, and if something looks wrong only with them on, tell us. Custom = set each fix in the rows below.",
+      nullptr },
+    { G_PIC, false, M_B, false, L"Glass and fence fix", L"on", nullptr, L"Ctrl+F3", nullptr, L"<c>0.05</> | <g>0.52</>", L"<c>0.04</> | <g>0.26</>", nullptr, nullptr, true },   // 112c
+    { G_PIC, false, M_B, false, L"Light trail fix", L"100 %", nullptr, L"dlaa.ini dlss_bias_mask", nullptr, L"- | <g>0.10</>", L"- | <g>0.05</>", nullptr, nullptr, true },   // phase 49
+    { G_PIC, false, M_B, false, L"Steady own shadow", L"on", nullptr, L"Ctrl+Shift+F3", nullptr, L"<c>0.02</> | -", nullptr, nullptr, nullptr, true },   // phase 105a
+    { G_PIC, false, M_B, false, L"Thin pole fix", L"off", nullptr, L"Ctrl+Shift+F4", nullptr, L"", nullptr, nullptr, nullptr, true },   // phase 109d
+    { G_PIC, false, M_B, false, L"Wire fix: motion", L"on", nullptr, L"Alt+F10", nullptr, L"", nullptr, nullptr, nullptr, true },   // phase 69 (112: moved here)
+    { G_PIC, false, M_B, false, L"Wire fix: depth", L"on", nullptr, L"Alt+F11", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PIC, false, M_B, false, L"Thicker wires (test)", L"off", nullptr, L"Alt+F12", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PIC, false, M_B, false, L"Power line fix", L"on", nullptr, L"dlaa.ini power_line_fix", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PIC, false, M_B, false, L"Lit edge fix", L"on", nullptr, L"dlaa.ini pixel_reader_fix", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PIC, false, M_B, false, L"Lit surface fix", L"on", nullptr, L"dlaa.ini light_redraw_jitter", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PIC, false, M_B, false, L"Roof shadow fix", L"on", nullptr, L"dlaa.ini light_fs_jitter", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PIC, false, M_B, false, L"Water block fix", L"on", nullptr, L"dlaa.ini water_overscan_fix", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PIC, false, M_V, false, L"Outside the DLAA area", L"", L"steady + smooth", L"dlaa.ini outside_aa", nullptr, L"", nullptr, nullptr, nullptr, true },   // VR, area < 100 %
+    { G_PIC, false, M_B, false, L"Far fence and leaf fix", L"on", nullptr, L"dlaa.ini cutout_mips", nullptr, L"", nullptr,
+      L"Far chain-link fences, railings and leaves keep their density instead of fading away with distance. On in Recommended. "
+      L"Works from the next game start: the textures are rebuilt while the game loads them.", nullptr, true },
+    // phase 112c: the sharpen block -- the Sharpen preset first, its five rows with Custom only
+    { G_PIC, false, M_B, false, L"Sharpen preset", L"Soft", nullptr, L"dlaa.ini sharp_preset", nullptr, L"", nullptr,
+      L"All sharpening in one choice. Off = none. Soft and Balanced keep edges clean; Crisp and Extra crisp are sharper, with thin "
+      L"halos. Custom = set strength, filter, size, halo and colour yourself in the rows below. Changing a value by hand makes it Custom.",
+      nullptr },
     { G_PIC, false, M_B, false, L"Sharpen strength", L"0.4", nullptr, L"Shift+F7 / Shift+F8", nullptr, L"- | <g>0.12</>", L"- | <g>0.06</>",
-      L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
-      L"Costs about 0.1 ms; 0 skips the pass.",
-      L"Costs 0.12 GPU per frame now; 0 saves it." },
-    { G_PIC, false, M_B, false, L"Sharpness size", L"1.5 px", nullptr, L"Shift+F9 / Shift+F10", nullptr, L"- | <g>0.12</>", L"- | <g>0.06</>", nullptr, nullptr },
+      L"Sharpens the picture after DLAA, 0 (off) to 2.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
+      L"Above 1.0 RCAS pushes harder (NIS stops at 1.0). Costs about 0.1 ms; 0 skips the pass.",
+      L"Costs 0.12 GPU per frame now; 0 saves it.", true },
+    { G_PIC, false, M_B, false, L"Sharpen type", L"RCAS (AMD)", nullptr, L"dlaa.ini sharpen_type", nullptr, L"", nullptr, nullptr, nullptr, true },   // phase 101
+    { G_PIC, false, M_B, false, L"Sharpness size", L"1.5 px", nullptr, L"Shift+F9 / Shift+F10", nullptr, L"- | <g>0.12</>", L"- | <g>0.06</>", nullptr, nullptr, true },
+    { G_PIC, false, M_B, false, L"Halo limit", L"0 %", nullptr, L"dlaa.ini sharp_halo", nullptr, L"", nullptr, nullptr, nullptr, true },   // phase 104
+    { G_PIC, false, M_B, false, L"Sharpen colour", L"colour", nullptr, L"dlaa.ini sharp_luma", nullptr, L"", nullptr, nullptr, nullptr, true },
     { G_PIC, false, M_B, false, L"Texture sharpness", L"-0.50", nullptr, L"Ctrl+F1 / Ctrl+F2", nullptr, L"<c>0.02</> | -", nullptr, nullptr, nullptr },
     { G_PIC, false, M_B, false, L"Leaves and fences sharpness", L"same (-0.50)", nullptr, L"Ctrl+Shift+F1 / Ctrl+Shift+F2", nullptr, L"<c>0.02</> | -", nullptr, nullptr, nullptr },
-    { G_PIC, false, M_B, false, L"Glass and fence fix", L"on", nullptr, L"Ctrl+F3", nullptr, L"<c>0.05</> | <g>0.52</>", L"<c>0.04</> | <g>0.26</>", nullptr, nullptr },
-    { G_PIC, false, M_B, false, L"Light trail fix", L"100 %", nullptr, L"dlaa.ini dlss_bias_mask", nullptr, L"- | <g>0.10</>", L"- | <g>0.05</>", nullptr, nullptr },   // phase 49
     { G_PIC, false, M_V, false, L"DLAA area", L"", L"40 %", L"Shift+F5 / Shift+F6", nullptr, L"<c>0.12</> | <g>1.2</>", nullptr, nullptr, nullptr },   // VR only
     // ---- Motion and mirrors ----
     { G_MOT, true, M_B, false, L"Motion and mirrors", L"", nullptr, L"", nullptr, L"", nullptr,
@@ -106,9 +144,12 @@ static const E kRows[] = {
       L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring gets one "
       L"colour per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
       L"CPU 0.04 ms per frame; it saves GPU time in the game's own figure." },
-    { G_VRP, false, M_V, false, L"Foveated size", L"", L"80 % (balanced)", L"dlaa.ini vrs_inner / vrs_outer", nullptr, L"<c>0.04</> | -", nullptr, nullptr, nullptr },
-    { G_VRP, false, M_V, false, L"Foveated: lighting too", L"", L"scene", L"dlaa.ini vrs_passes", nullptr, L"<c>0.04</> | -", nullptr, nullptr, nullptr },
-    { G_VRP, false, M_V, false, L"Foveated strength", L"", L"Normal (2 x 2)", L"dlaa.ini vrs_strength", nullptr, L"<c>0.04</> | -", nullptr, nullptr, nullptr },   // phase 59f
+    { G_VRP, false, M_V, false, L"Foveated preset", L"", L"Recommended", L"dlaa.ini vrs_preset", nullptr, L"", nullptr,   // phase 112c
+      L"Recommended = Foveated rendering's size, lighting and strength at their tested defaults. Custom = set Foveated size, "
+      L"Foveated: lighting too and Foveated strength yourself in the rows below.", nullptr },
+    { G_VRP, false, M_V, false, L"Foveated size", L"", L"80 % (balanced)", L"dlaa.ini vrs_inner / vrs_outer", nullptr, L"<c>0.04</> | -", nullptr, nullptr, nullptr, true },
+    { G_VRP, false, M_V, false, L"Foveated: lighting too", L"", L"scene", L"dlaa.ini vrs_passes", nullptr, L"<c>0.04</> | -", nullptr, nullptr, nullptr, true },
+    { G_VRP, false, M_V, false, L"Foveated strength", L"", L"Normal (2 x 2)", L"dlaa.ini vrs_strength", nullptr, L"<c>0.04</> | -", nullptr, nullptr, nullptr, true },   // phase 59f
     { G_VRP, false, M_V, false, L"Foveated eye tracking", L"", L"off", L"dlaa.ini vrs_eye", nullptr, L"off", nullptr, nullptr, nullptr },   // phase 59
     { G_VRP, false, M_V, false, L"Skip hidden edges", L"", L"on", L"dlaa.ini xr_hidden_mask", nullptr, L"<c>0.02</> | -", nullptr, nullptr, nullptr },
     { G_VRP, false, M_V, true,  L"OFXR Bridge (VR frame gen)", L"", L"not found", L"dlaa.ini ofxr_bridge", nullptr, L"", nullptr, nullptr, nullptr },   // not present
@@ -155,19 +196,19 @@ static const E kRows[] = {
     { G_PANEL, false, M_B, false, L"Panel size", L"1.0", nullptr, L"dlaa.ini menu_scale", L"dlaa.ini menu_vr_scale", L"", nullptr, nullptr, nullptr },
     { G_PANEL, false, M_B, false, L"Menu keys", L"Delete", nullptr, L"Up / Down / Left / Right", nullptr, L"", nullptr, nullptr, nullptr },
     { G_PANEL, false, M_V, false, L"Panel lock", L"", L"Follow head", L"dlaa.ini menu_vr_lock", nullptr, L"", nullptr, nullptr, nullptr },   // phase 70
-    { G_PANEL, false, M_V, false, L"Panel depth", L"", L"1.00 m", L"dlaa.ini menu_vr_dist", nullptr, L"", nullptr, nullptr, nullptr },
-    { G_PANEL, false, M_V, false, L"Panel faces you", L"", L"on", L"dlaa.ini menu_vr_face", nullptr, L"", nullptr, nullptr, nullptr },
+    { G_PANEL, false, M_V, false, L"Panel preset", L"", L"Recommended", L"dlaa.ini panel_preset", nullptr, L"", nullptr,   // phase 112c
+      L"VR only. Recommended = the panel's depth and facing at their defaults. Custom = set Panel depth and Panel faces you yourself "
+      L"in the rows below. No cost.", nullptr },
+    { G_PANEL, false, M_V, false, L"Panel depth", L"", L"1.00 m", L"dlaa.ini menu_vr_dist", nullptr, L"", nullptr, nullptr, nullptr, true },
+    { G_PANEL, false, M_V, false, L"Panel faces you", L"", L"on", L"dlaa.ini menu_vr_face", nullptr, L"", nullptr, nullptr, nullptr, true },
     // ---- Compare and test ----
     { G_CMP, true, M_B, false, L"Compare and test", L"", nullptr, L"", nullptr, L"", nullptr,
-      L"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, running DLAA earlier. Nothing "
-      L"here is needed for normal driving. Right opens the group, Left closes it.", nullptr },
+      L"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, running DLAA earlier (the fixes: Picture "
+      L"preset). Nothing here is needed for normal driving. Right opens the group, Left closes it.", nullptr },
     { G_CMP, false, M_B, false, L"DLAA off to compare (not saved)", L"on", nullptr, L"Shift+F11", nullptr, L"<c>0.31</> | <g>3.4</>", L"<c>0.28</> | <g>1.9</>", nullptr, nullptr },
     { G_CMP, false, M_B, false, L"Split with game TAA", L"off", nullptr, L"dlaa.ini game_taa", nullptr, L"", nullptr, nullptr, nullptr },
     { G_CMP, false, M_B, true,  L"Split line position", L"50 %", nullptr, L"dlaa.ini game_taa_split", nullptr, L"", nullptr, nullptr, nullptr },   // split off -> hidden
     { G_CMP, false, M_B, true,  L"Split: left | right", L"DLAA | TAA", nullptr, L"dlaa.ini game_taa_pair", nullptr, L"", nullptr, nullptr, nullptr },   // split off -> hidden
-    { G_CMP, false, M_B, false, L"Wire fix: motion", L"on", nullptr, L"Alt+F10", nullptr, L"", nullptr, nullptr, nullptr },          // phase 69
-    { G_CMP, false, M_B, false, L"Wire fix: depth", L"on", nullptr, L"Alt+F11", nullptr, L"", nullptr, nullptr, nullptr },
-    { G_CMP, false, M_B, false, L"Thicker wires (test)", L"off", nullptr, L"Alt+F12", nullptr, L"", nullptr, nullptr, nullptr },
     { G_CMP, false, M_F, false, L"Run DLAA earlier (test)", L"off", nullptr, L"Alt+F7", nullptr, L"same", nullptr, nullptr, nullptr },   // flat only
     // ---- Bug report ----
     { G_BUG, true, M_B, false, L"Bug report", L"", nullptr, L"", nullptr, L"", nullptr,
@@ -179,10 +220,13 @@ static const E kRows[] = {
     { G_BUG, false, M_B, false, L"Capture includes", L"Quick", nullptr, L"dlaa.ini capture_mode", nullptr, L"", nullptr, nullptr, nullptr },
     { G_BUG, false, M_B, false, L"Capture key", L"Insert (press twice)", nullptr, L"Right: change", nullptr, L"", nullptr, nullptr, nullptr },
     { G_BUG, false, M_B, false, L"Keep captures", L"all", nullptr, L"dlaa.ini capture_keep", nullptr, L"", nullptr, nullptr, nullptr },
+    { G_BUG, false, M_B, false, L"Show unfixed shaders", L"off", nullptr, L"Ctrl+Shift+F5", nullptr, L"off", nullptr,   // phase 110
+      L"Helps find flicker the mod does not fix yet: such draws are coloured, and a legend says what each colour means (15 s, and "
+      L"while this row is selected). See one flicker? Press the capture key twice: the zip then holds what we need to fix it. Off = no cost.", nullptr },
     { G_BUG, false, M_B, false, L"Capture now", L"ready", nullptr, L"Right", nullptr, L"", nullptr, nullptr, nullptr },
     // ---- top level (end) ----
     { -1, false, M_B, false, L"Language", L"auto (English)", nullptr, L"dlaa.ini language", nullptr, L"", nullptr, nullptr, nullptr },   // phase 74
-    { -1, false, M_B, false, L"Hotkeys...", L"32 actions", nullptr, L"Right: open", nullptr, L"", nullptr, nullptr, nullptr },   // v0.13.0 phase 50
+    { -1, false, M_B, false, L"Hotkeys...", L"37 actions", nullptr, L"Right: open", nullptr, L"", nullptr, nullptr, nullptr },   // v0.13.0 phase 50 (kMenuHkActions)
     { -1, false, M_B, false, L"Save to dlaa.ini", L"-", nullptr, L"Shift+F12", nullptr, L"", nullptr, nullptr, nullptr },
     { -1, false, M_B, false, L"Reset to defaults", L"-", nullptr, L"hold Right 5 s", nullptr, L"", nullptr, nullptr, nullptr },
     { -1, false, M_B, false, L"Close menu", L"-", nullptr, L"Delete", nullptr, L"", nullptr, nullptr, nullptr },
@@ -201,7 +245,7 @@ static const wchar_t kPerf1F[] = L"this mod: <c>0.28</> | <g>1.9</> ms -- GPU: N
                                  L"mirrors 0.17, sharpen 0.06, copies 0.1";
 static const wchar_t kPerf2F[] = L"<c>CPU</> | <g>GPU</> ms per frame, other threads 0.4. CPU = the game's render thread; measuring costs "
                                  L"0.12 ms CPU (taken out).";
-static const wchar_t kTitle[]  = L"ETS2 / ATS DLAA & DLSS mod v0.17.0 - tuning menu";
+static const wchar_t kTitle[]  = L"ETS2 / ATS DLAA & DLSS mod v0.17.0-rc2 - tuning menu";
 static const wchar_t kFooter[] = L"Up / Down select   Left / Right change   Delete close   keys: Hotkeys...";
 
 // Ink shorthand in the table strings: "<c>0.31</>" = CPU blue, "<g>3.4</>" = GPU orange (menu.h kInkCpu / kInkGpu / kInkEnd).
@@ -228,6 +272,7 @@ static bool RowInShot(const E& e, bool vr, bool showAll) {
     if (e.mode == M_V && !vr) return false;
     if (e.mode == M_F && vr) return false;
     if (e.hidden && !showAll) return false;
+    if (e.custom && !showAll && !g_custom) return false;          // phase 112: a fix row outside Picture fixes = Custom
     return true;
 }
 
@@ -262,6 +307,9 @@ static void BuildPanel(TuningMenu::Panel& p, bool vr, bool showAll, const bool o
             swprintf(r.keys, 96, L"%ls: %ls", open[e.grp] ? L"Left" : L"Right", open[e.grp] ? T(L"close") : T(L"open"));
         } else {
             const wchar_t* v = (vr && e.valueVr) ? e.valueVr : e.value;
+            // phase 112 / 112c: the Custom shots -- every preset row reads Custom (its detail rows are listed)
+            if (g_custom && (!wcscmp(e.name, L"Picture preset") || !wcscmp(e.name, L"Sharpen preset") ||
+                             !wcscmp(e.name, L"Foveated preset") || !wcscmp(e.name, L"Panel preset"))) v = L"Custom";
             wcsncpy_s(r.value, T(v), _TRUNCATE);
         }
         const wchar_t* cost = (!vr && e.costFlat) ? e.costFlat : e.cost;
@@ -460,10 +508,14 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
         { L"Cut-out sharpness -", L"Ctrl+Shift+F1", L"-" }, { L"Cut-out sharpness +", L"Ctrl+Shift+F2", L"-" },
         { L"DLAA area (VR) -", L"Shift+F5", L"-" }, { L"DLAA area (VR) +", L"Shift+F6", L"-" },
         { L"Per-part motion vectors", L"Alt+F5", L"-" }, { L"Mirror DLAA on / off", L"Alt+F6", L"-" },
-        { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"See-through depth", L"Ctrl+F3", L"-" },
+        { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"Picture preset Recommended / Off", L"Ctrl+Shift+F7", L"-" },
+        { L"See-through depth", L"Ctrl+F3", L"-" },
         { L"Thin-wire motion (DLAA)", L"Alt+F10", L"-" }, { L"Thin-wire depth", L"Alt+F11", L"-" }, { L"Thin-wire widening", L"Alt+F12", L"-" },
         { L"DLSS upscale", L"Ctrl+F4", L"-" }, { L"DLAA on / off", L"Shift+F11", L"-" },
-        { L"Shimmer capture", L"Insert", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
+        { L"Shimmer capture", L"Insert", L"-" },
+        { L"Steady own shadow on / off", L"Ctrl+Shift+F3", L"-" }, { L"Show unfixed shaders", L"Ctrl+Shift+F5", L"-" },
+        { L"Shader census mark", L"Ctrl+Shift+F6", L"-" }, { L"Thin pole fix on / off", L"Ctrl+Shift+F4", L"-" },
+        { L"Save to dlaa.ini", L"Shift+F12", L"-" },
         { L"Menu: open / close", L"Delete", L"-" }, { L"Menu: up", L"Up", L"-" }, { L"Menu: down", L"Down", L"-" },
         { L"Menu: left", L"Left", L"-" }, { L"Menu: right", L"Right", L"-" },
     };
@@ -472,7 +524,7 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
     const int bindLine = 8;                                        // "Sharpen strength +"
     TuningMenu::Panel p;
     memset(&p, 0, sizeof(p));
-    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.17.0 - hotkeys", _TRUNCATE);
+    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.17.0-rc2 - hotkeys", _TRUNCATE);
     Put(p.perf[0], 224, Ink(kPerf0));
     Put(p.perf[1], 224, Ink(kPerf1));
     Put(p.perf[2], 224, Ink(kPerf2));
@@ -558,6 +610,164 @@ static void FpsShots(Gpu& g) {
     }
 }
 
+// phase 112b: census-legend.png -- the census colour legend (src/census_legend.h, the text the DLL shows) as on a 1080p screen
+// (scale 1.25, top centre) with the bindings Insert / Ctrl+Shift+F5; census-legend-4k.png the same at 4K scale (2.5) to prove the
+// box grows with its glyphs (nothing cut); census-legend-unbound.png with both keys unbound (the footer names the menu rows).
+// phase 113: the plain-words legend (title, three lines, the small colour key); census-legend-fixoff.png with the extra line shown
+// while a draw is coloured because a fix is switched off.
+static void LegendShot(Gpu& g, const wchar_t* file, float s, const wchar_t* capKey, const wchar_t* viewKey, bool fixOff = false) {
+    TuningMenu::Legend lg;
+    CensusLegendFill(lg, capKey, viewKey, fixOff);
+    float rw = 0.0f, rh = 0.0f;
+    if (!TuningMenu::LegendRefSize(lg, &rw, &rh)) { wprintf(L"  %ls: LegendRefSize FAILED\n", file); ++g_fail; return; }
+    const int W = (int)std::ceil(rw * s * 1.05f) + 40, H = (int)std::ceil(rh * s) + 40;   // (+5 %: GDI widens at bigger sizes)
+    std::vector<uint32_t> px;
+    float dh = 0.0f;
+    const bool ok = Render(g, W, H, [&](ID3D11DeviceContext* c, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
+        return TuningMenu::DrawLegend(c, rtv, w, h, 0.5f * (float)w, 20.0f, 0.5f, 0.0f, s, s * 2.0f, 0.0f, 0.0f,
+                                      TuningMenu::kOutRaw, lg, TuningMenu::kStatusFlat, &dh);
+    }, px);
+    if (!ok) { wprintf(L"  %ls: render FAILED\n", file); ++g_fail; return; }
+    if (std::fabs(dh - rh * s) > 2.0f) { wprintf(L"  %ls: drawn %.1f px high, want %.1f (shrunk = cut?)\n", file, dh, rh * s); ++g_fail; }
+    Save(file, px, W, H);
+}
+
+// phase 112r: the legend in the targets the DLL really draws it in, with the DLL's own max width / height (inject.cpp: flat = 1.25 x
+// H / 1080, maxW 0.96 W, maxH 0.94 H - its top; VR eye = 1.25 x W / 1920, maxW 0.8 W, maxH 0.6 H). The 112b shots passed maxW = 0
+// (never shrinks), so a legend too wide for a real screen passed. FAIL when it would shrink (the text gets smaller than designed) or
+// does not fit the target.
+static void LegendFitShot(Gpu& g, const wchar_t* file, int W, int H, float s, float maxW, float maxH) {
+    TuningMenu::Legend lg;
+    CensusLegendFill(lg, L"Insert", L"Ctrl+Shift+F5", true);   // phase 113: the tallest form (with the fix-off line)
+    float rw = 0.0f, rh = 0.0f;
+    if (!TuningMenu::LegendRefSize(lg, &rw, &rh)) { wprintf(L"  %ls: LegendRefSize FAILED\n", file); ++g_fail; return; }
+    if (rw * s > maxW + 1.0f || rh * s > maxH + 1.0f) {
+        wprintf(L"  %ls: the legend (%.0f x %.0f px) does not fit %dx%d's max %.0f x %.0f -- it would shrink\n", file, rw * s, rh * s, W, H,
+                maxW, maxH);
+        ++g_fail;
+    }
+    std::vector<uint32_t> px;
+    float dh = 0.0f;
+    const bool ok = Render(g, W, H, [&](ID3D11DeviceContext* c, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
+        return TuningMenu::DrawLegend(c, rtv, w, h, 0.5f * (float)w, 20.0f, 0.5f, 0.0f, s, s * 2.0f, maxW, maxH,
+                                      TuningMenu::kOutRaw, lg, TuningMenu::kStatusFlat, &dh);
+    }, px);
+    if (!ok) { wprintf(L"  %ls: render FAILED\n", file); ++g_fail; return; }
+    if (std::fabs(dh - rh * s) > 2.0f) { wprintf(L"  %ls: drawn %.1f px high, want %.1f (shrunk to fit)\n", file, dh, rh * s); ++g_fail; }
+    if (dh > (float)H) { wprintf(L"  %ls: drawn %.1f px high in a %d px target (clipped)\n", file, dh, H); ++g_fail; }
+    Save(file, px, W, H);
+}
+
+// phase 115: the census BUG ICON -- census-bug.png (the flat box at 1080p scale 1.25, as the DLL draws it in a top corner),
+// census-bug-big-counts.png (3-digit counts: the font shrinks, nothing cut), census-bug-vr.png (the fps box with the bug strip
+// under it at a VR eye's fps box scale -- the strip is part of the box's own texture, so every VR placement of the box carries it)
+// phase 116: + census-bug-fixoff(-big).png / census-bug-vr-fixoff.png -- the small third line "N: fix is off" in the same box sizes
+static void BugShots(Gpu& g) {
+    auto box = [&](const wchar_t* file, const wchar_t* l1, const wchar_t* l2, const wchar_t* l3 = nullptr) {
+        const float s = 1.25f;
+        const int W = (int)std::ceil(TuningMenu::kBugRefW * s) + 40, H = (int)std::ceil(TuningMenu::kBugRefH * s) + 40;
+        std::vector<uint32_t> px;
+        const bool ok = Render(g, W, H, [&](ID3D11DeviceContext* c, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
+            return TuningMenu::DrawBug(c, rtv, w, h, 20.0f, 20.0f, s, s * 2.0f, TuningMenu::kOutRaw, l1, l2, TuningMenu::kStatusFlat, l3);
+        }, px);
+        if (!ok) { wprintf(L"  %ls: render FAILED\n", file); ++g_fail; return; }
+        Save(file, px, W, H);
+    };
+    box(L"census-bug.png", L"3 to capture", L"5 captured");
+    box(L"census-bug-big-counts.png", L"128 to capture", L"999 captured");
+    box(L"census-bug-fixoff.png", L"3 to capture", L"5 captured", L"2: fix is off");             // phase 116: the third line
+    box(L"census-bug-fixoff-big.png", L"128 to capture", L"999 captured", L"120: fix is off");    //   (the font shrinks, nothing cut)
+    for (int pass = 0; pass < 2; ++pass) {               // phase 116: + the VR strip with the "fix is off" line (same strip size)
+        const wchar_t* vrFile = pass ? L"census-bug-vr-fixoff.png" : L"census-bug-vr.png";
+        const float s = 2064.0f * 0.08f / TuningMenu::kWidgetRefW;   // inject.cpp: the VR fps box = 8 % of the eye width (fps_vr_scale 1)
+        TuningMenu::SetWidgetBug(L"3 to capture", L"5 captured", pass ? L"2: fix is off" : nullptr);
+        const float rh = TuningMenu::WidgetRefH(L"72 fps", L"13.9 ms");
+        if (std::fabs(rh - (TuningMenu::kWidgetRefH + TuningMenu::kWidgetBugH)) > 0.01f || !TuningMenu::WidgetBugOn()) {
+            wprintf(L"  %ls: the fps box is %.1f ref px high with the bug strip (want %.1f)\n", vrFile, rh,
+                    TuningMenu::kWidgetRefH + TuningMenu::kWidgetBugH);
+            ++g_fail;
+        }
+        const int W = (int)std::ceil(TuningMenu::kWidgetRefW * s) + 40, H = (int)std::ceil(TuningMenu::kWidgetRefHMax * s) + 40;
+        std::vector<uint32_t> px;
+        const bool ok = Render(g, W, H, [&](ID3D11DeviceContext* c, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
+            return TuningMenu::DrawWidget(c, rtv, w, h, 20.0f, 20.0f, s, s, TuningMenu::kOutRaw, L"72 fps", L"13.9 ms");
+        }, px);
+        TuningMenu::SetWidgetBug(nullptr, nullptr);
+        if (TuningMenu::WidgetBugOn() || std::fabs(TuningMenu::WidgetRefH(L"72 fps", L"13.9 ms") - TuningMenu::kWidgetRefH) > 0.01f) {
+            wprintf(L"  %ls: the strip did not go with SetWidgetBug(null)\n", vrFile);
+            ++g_fail;
+        }
+        TuningMenu::ReleaseWidget();
+        if (!ok) { wprintf(L"  %ls: render FAILED\n", vrFile); ++g_fail; return; }
+        Save(vrFile, px, W, H);
+    }
+}
+
+// phase 115: census-checker.png / census-checker-phase1.png -- the REAL census paint (src/census_paint.h + the PSPaint / VSPaint of
+// src/census.h, compiled here) over the road picture: a mask with one object per kind (thin poles, a see-through bush, a pixel-reader
+// sign, a water band, a "new" block), both phases of the flash (the DLL swaps them 4 times a second). 1280 x 720: 8 px squares.
+static void CheckerShots(Gpu& g) {
+    auto comp = [](const char* entry, const char* prof, std::vector<uint8_t>& out) {
+        ID3DBlob *b = nullptr, *e = nullptr;
+        const bool ok = SUCCEEDED(D3DCompile(kCensusTintPs, strlen(kCensusTintPs), nullptr, nullptr, nullptr, entry, prof, 0, 0, &b, &e));
+        if (ok) out.assign((const uint8_t*)b->GetBufferPointer(), (const uint8_t*)b->GetBufferPointer() + b->GetBufferSize());
+        if (e) { printf("%s\n", (const char*)e->GetBufferPointer()); e->Release(); }
+        if (b) b->Release();
+        return ok;
+    };
+    std::vector<uint8_t> vs, ps;
+    CensusPaint::Kit kit;
+    if (!comp("VSPaint", "vs_5_0", vs) || !comp("PSPaint", "ps_5_0", ps) || !kit.Ensure(g.dev, vs.data(), vs.size(), ps.data(), ps.size())) {
+        wprintf(L"  census-checker.png: the paint shaders FAILED\n"); ++g_fail; return;
+    }
+    const int W = 1280, H = 720;
+    std::vector<uint32_t> mask((size_t)W * H, 0u);
+    auto fill = [&](int kind, auto inside) {
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x)
+                if (inside(x, y)) mask[(size_t)y * W + x] = Census::MaskWord(kind, false, 0.0f);
+    };
+    fill(2, [](int x, int y) { return y > 120 && y < 520 && ((x >= 140 && x < 146) || (x >= 330 && x < 334) || (x >= 470 && x < 473)); });   // thin poles
+    fill(1, [](int x, int y) { const float dx = (x - 700) / 150.0f, dy = (y - 330) / 110.0f; return dx * dx + dy * dy < 1.0f; });          // bush
+    fill(0, [](int x, int y) { return x >= 960 && x < 1160 && y >= 140 && y < 260; });                                                         // sign
+    fill(3, [](int x, int y) { return y >= 600 && y < 690; });                                                                                // water
+    fill(4, [](int x, int y) { return x >= 1000 && x < 1080 && y >= 380 && y < 460; });                                                       // new
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = W; td.Height = H; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32_UINT; td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA sd{ mask.data(), (UINT)(W * 4), 0 };
+    ID3D11Texture2D* mt = nullptr;
+    ID3D11ShaderResourceView* ms = nullptr;
+    if (FAILED(g.dev->CreateTexture2D(&td, &sd, &mt)) || FAILED(g.dev->CreateShaderResourceView(mt, nullptr, &ms))) {
+        wprintf(L"  census-checker.png: mask FAILED\n"); ++g_fail; if (mt) mt->Release(); kit.Release(); return;
+    }
+    for (int phase = 0; phase < 2; ++phase) {
+        std::vector<uint32_t> px;
+        const bool ok = Render(g, W, H, [&](ID3D11DeviceContext* c, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
+            ID3D11Resource* r = nullptr;
+            rtv->GetResource(&r);
+            CensusPaint::Params p;
+            p.maskW = W; p.maskH = H; p.dstW = w; p.dstH = h; p.cell = Census::PaintCell(w); p.phase = phase;
+            const bool painted = CensusPaint::Paint(c, kit, static_cast<ID3D11Texture2D*>(r), ms, nullptr, p);
+            if (r) r->Release();
+            kit.ReleaseViews();                          // (each Render makes a new target)
+            return painted;
+        }, px);
+        const wchar_t* file = phase ? L"census-checker-phase1.png" : L"census-checker.png";
+        if (!ok) { wprintf(L"  %ls: render FAILED\n", file); ++g_fail; continue; }
+        // the measured sample: the bush's squares must be (255, 112, 0) and black, the poles cyan / black
+        const uint32_t o = px[(size_t)330 * W + 700];
+        const int r = o & 0xFF, gg = (o >> 8) & 0xFF, b = (o >> 16) & 0xFF;
+        const bool orange = r == 255 && gg == 112 && b == 0, black = r == 0 && gg == 0 && b == 0;
+        printf("  %ls: the bush's pixel (700, 330) = (%d, %d, %d) %s\n", file, r, gg, b, orange ? "orange" : (black ? "black" : "?"));
+        if (!orange && !black) ++g_fail;
+        Save(file, px, W, H);
+    }
+    ms->Release();
+    mt->Release();
+    kit.Release();
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) { printf("usage: menu_shot <output dir>\n"); return 2; }
     {
@@ -582,8 +792,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     printf("menu_shot -> %ls\n", g_dir.c_str());
-    bool none[G_COUNT] = {}, vrp[G_COUNT] = {}, pic[G_COUNT] = {}, all[G_COUNT];
-    vrp[G_VRP] = true; pic[G_PIC] = true;
+    bool none[G_COUNT] = {}, vrp[G_COUNT] = {}, pic[G_COUNT] = {}, bug[G_COUNT] = {}, all[G_COUNT];
+    bool panel[G_COUNT] = {};
+    vrp[G_VRP] = true; pic[G_PIC] = true; bug[G_BUG] = true; panel[G_PANEL] = true;
     for (bool& o : all) o = true;
     if (argc >= 4) {                                                              // phase 74: one language (VR shots)
         wchar_t po[MAX_PATH];
@@ -604,10 +815,27 @@ int main(int argc, char** argv) {
     MenuShot(g, L"tuning-menu-vr.png", /*vr*/true, /*showAll*/false, none, L"Mode");
     MenuShot(g, L"tuning-menu-all-open.png", /*vr*/false, /*showAll*/true, all, L"Mode");
     MenuShot(g, L"tuning-menu-all-open-vr.png", /*vr*/true, /*showAll*/true, all, L"Mode");
-    MenuShot(g, L"tuning-menu-vr-performance.png", /*vr*/true, /*showAll*/false, vrp, L"Foveated rendering");
-    MenuShot(g, L"tuning-menu-picture.png", /*vr*/true, /*showAll*/false, pic, L"Sharpen strength");
+    MenuShot(g, L"tuning-menu-vr-performance.png", /*vr*/true, /*showAll*/false, vrp, L"Foveated preset");   // 112c: Recommended
+    MenuShot(g, L"tuning-menu-picture.png", /*vr*/true, /*showAll*/false, pic, L"Picture preset");   // phase 112: Recommended
+    MenuShot(g, L"tuning-menu-panel.png", /*vr*/true, /*showAll*/false, panel, L"Panel preset");      // phase 112c: Recommended
+    g_custom = true;                                                              // phase 112 / 112c: every preset = Custom (its rows)
+    MenuShot(g, L"tuning-menu-picture-custom.png", /*vr*/true, /*showAll*/false, pic, L"Sharpen preset");
+    MenuShot(g, L"tuning-menu-vr-performance-custom.png", /*vr*/true, /*showAll*/false, vrp, L"Foveated strength");
+    MenuShot(g, L"tuning-menu-panel-custom.png", /*vr*/true, /*showAll*/false, panel, L"Panel depth");
+    g_custom = false;
+    MenuShot(g, L"tuning-menu-bug-report.png", /*vr*/false, /*showAll*/false, bug, L"Show unfixed shaders");   // phase 110
     HotkeysShot(g, L"tuning-menu-hotkeys.png");                                   // v0.13.0 phase 50: the Hotkeys page
     FpsShots(g);
+    LegendShot(g, L"census-legend.png", 1.25f, L"Insert", L"Ctrl+Shift+F5");      // phase 112b
+    LegendShot(g, L"census-legend-4k.png", 2.5f, L"Insert", L"Ctrl+Shift+F5");
+    LegendShot(g, L"census-legend-unbound.png", 1.25f, L"none", L"none");
+    LegendShot(g, L"census-legend-fixoff.png", 1.25f, L"Insert", L"Delete", true);   // phase 113
+    LegendFitShot(g, L"census-legend-1080p.png", 1920, 1080, 1.25f, 0.96f * 1920.0f, 0.94f * 1080.0f - 20.0f);   // phase 112r
+    LegendFitShot(g, L"census-legend-2160p.png", 3840, 2160, 2.5f, 0.96f * 3840.0f, 0.94f * 2160.0f - 40.0f);
+    LegendFitShot(g, L"census-legend-vr-eye.png", 2064, 2208, 2064.0f / 1920.0f * 1.25f, 0.8f * 2064.0f, 0.6f * 2208.0f);
+    LegendFitShot(g, L"census-legend-vr-eye-low.png", 1440, 1584, 1440.0f / 1920.0f * 1.25f, 0.8f * 1440.0f, 0.6f * 1584.0f);
+    BugShots(g);                                                                  // phase 115
+    CheckerShots(g);
     g.ctx->Release();
     g.dev->Release();
     printf("%s\n", g_fail ? "FAILED" : "all images written");

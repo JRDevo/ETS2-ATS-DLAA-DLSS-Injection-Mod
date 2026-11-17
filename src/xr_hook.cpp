@@ -2138,7 +2138,7 @@ void EgFailLocked(const char* what, XrResult r) {   // under s_egMx: gaze off fo
     s_eg.failed = true;
     s_egFailedA.store(true, std::memory_order_relaxed);
     LogErr("Eye tracking: %s FAILED -> %d = %s -- eye gaze off for this session (session %p); VRS keeps the optical centre", what, r,
-        XrResultName(r));
+        XrResultName(r), (void*)s_eg.ses);   // (phase 109r format check: the session argument was missing)
 }
 // The game's outermost PRIMARY_STEREO xrLocateViews returned (r >= 0; `views` = its two views in li->space at li->displayTime):
 // attach alone if due, our action space, our own sync (no game sync within 100 ms, FOCUSED), the gaze locate (once per display

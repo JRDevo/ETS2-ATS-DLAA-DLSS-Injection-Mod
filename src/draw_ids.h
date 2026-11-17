@@ -456,6 +456,13 @@ public:
     using ReplayGsFn = bool (*)(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale);
     static void SetReplayGs(ReplayGsFn fn, ID3D11BlendState* depthBsNoA2c);
     void SetNextGs(uint8_t kind) { m_nextGs = kind; }  // the next Record's widening kind (consumed by that call, recorded or not)
+    // phase 109b: a forward draw the GAME already widened (the power-line PS 69dcaf36: max(clip w x k, radius) wide, alpha = radius /
+    // width) -> no GS, but the depth batch draws it WITHOUT alpha-to-coverage (ReplayNoA2c) like a widened band: with A2C its
+    // alpha < 0.5 pixels (far lines) got no depth / MV -> smear and dashes while driving.
+    static constexpr uint8_t kGsNoA2c = 0x40;
+    // phase 109r: OR'd onto a solid replay kind (2..5) by the standalone pole_aa (PoleOnDraw): the replay binds that GS in POLE mode
+    // with pole_min_px (WireWiden::BindReplay), so the forward depth / id band matches the pole's colour band, not wire_min_px's
+    static constexpr uint8_t kGsPole = 0x80;
 
     // ---- pairing inputs (CameraMv / DrawIdMv at the blit) ----
     uint64_t FullKey(int i) const;               // IB, VB0, offsets, counts, base vertex, VS, instanced
@@ -619,7 +626,8 @@ public:
     // v0.10.0 phase 6, dlaa.ini mv_drawid_parent (default on): unpaired draws take the R / state of their rigid parent (the
     // pixel-neighbour vote); SetParentMutation = harness mutations only (bit 0: the conjugated row-vector formula instead of
     // R_parent, bit 1: no depth test in the vote; phase 14 round 6: bit 2 = the origin-free rule off, bit 3 = multi-instance draws
-    // listed for the vote / held again, the round-4 behaviour; round 7: bit 4 = the round-6 origin-free rule) -- never set by the DLL
+    // listed for the vote / held again, the round-4 behaviour; round 7: bit 4 = the round-6 origin-free rule; phase 106: bit 7 =
+    // paired origin-free SMALL draws resolved static again instead of listed for the vote) -- never set by the DLL
     static void SetParent(bool on);
     static bool Parent();
     static void SetParentMutation(int bits);
@@ -883,6 +891,7 @@ public:
         // them, of them paired + static by their own pair / moving (reset their key) / neutral (no partner), rigid-parent marks
         uint64_t statFeeds = 0, statDraws = 0, statStatic = 0, statParents = 0, statMoving = 0, statNeutral = 0;
         uint64_t statShallow = 0;                // round 3: static within the snap but not deep (counted among the moving)
+        uint64_t statConflict = 0;               // phase 109r: draws in both the static and the reset bitmask (must stay 0)
         // round 4 (read back): listed draws that kept last pass's moving parent (plate hold) / votes whose moving candidate was
         // vetoed by flush contact with the static world (grass beside a passing car)
         uint64_t parHolds = 0, parVetoes = 0;
@@ -890,6 +899,9 @@ public:
         // round 6 (read back): paired draws with an ORIGIN-FREE (camera-relative) MVP resolved static (their own R is the camera
         // rotation only); the instanced draws' instance counts as the shaders saw them: sum, and draws per count (index 7 = 7+)
         uint64_t originFree = 0, instSum = 0, instHist[8] = {};
+        // phase 106 (read back, Cnt [245..247]): of the origin-free paired draws, the SMALL world ones (IndexCount <= 512: view-space
+        // plates) left at state 1 for the rigid-parent vote; of them listed (a U slot); moving parents they took (vote or plate hold)
+        uint64_t originSmall = 0, originSmallListed = 0, originSmallMover = 0;
         // round 7 (read back, Cnt [224] / [229]): paired draws whose MVP origin passed the DEPTH part of the origin-free rule
         // (|w| <= 0.20 m) but failed the LATERAL part (|x| or |y| > 0.50 clip); own-pair movers with their origin |w| < 0.5 m
         uint64_t originDepthOnly = 0, originMoverNear = 0;

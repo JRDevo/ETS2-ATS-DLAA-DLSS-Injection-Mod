@@ -64,6 +64,11 @@
 // position in the vertices), non-instanced and instanced (2 / 3 / 8 instances), beside an overtaking car, an oncoming car and a
 // parked van: every clump pixel must keep the exact camera motion; the instance counts the shaders saw are checked end to end.
 // "mutcr" (the origin-free rule off) must FAIL S15; "mutinst" (multi-instance draws listed again, the round-4 rule) fails it too.
+// Phase 106: S15's camera-relative clumps carry 3360 indices (degenerate padding = the game's smallest grass batch): grass-sized,
+// never listed for the vote. S21 (scene 21, after S20 in the full run) = S8 with REPEATING loose keys (every frame / 3 of 4): the
+// view-space plates pair and are origin-free, they must still take their body's motion; "mut106" (the rule off) must FAIL S21.
+// Phase 109r: S15 also checks no draw lands in both the static (384..511) and the reset bitmask (the large origin-free clumps must
+// stay out of the static skip bitmask); "mut109" (the phase-106 if / else-if chain break back) must FAIL S15.
 // Phase 80: S15 also asks the SOLID DITHER GATE (DrawIdMv::SolidDitherOk, inject.cpp SolidOnDraw) about every frame's keys: the
 // overtaking / oncoming car and its plate (movers) must never be dithered from frame 12, the parked van, the boxes and the ground
 // (static, like a far wire) must be known static from frame 20. "mutsolid" (the gate off = phases 63-68) must FAIL S15.
@@ -349,6 +354,13 @@ struct Geo {
         const uint32_t idx[6] = { 0, 1, 2, 0, 2, 3 };
         for (uint32_t q : idx) i.push_back(q);
         End(m);
+        return m;
+    }
+    // phase 106: pads the LAST mesh built (its indices end the index list) with degenerate triangles (index 0 three times: no
+    // pixel, no change to what is drawn) up to ic indices -- the IndexCount the game's draw would have
+    Mesh PadTo(Mesh m, UINT ic) {
+        if (m.si + m.ic != (UINT)i.size()) return m;     // not the last mesh: unchanged
+        while (m.ic + 3u <= ic) { i.push_back(0); i.push_back(0); i.push_back(0); m.ic += 3u; }
         return m;
     }
     // grass clump: two crossed vertical quads
@@ -3414,8 +3426,22 @@ int RunPlateScene(Env& E, float snapPx, Totals& tot, bool mutNoAttach, bool mutN
 // are depth-rejected, the body above / beside must still win). Every plate pixel must move with its body; "noparent" fails them.
 // The roadside grass moved to x = -12.5 (clear of the far van). reachPx > 0 (the "S8 short reach" run): the march reach is cut
 // to reachPx so the plate text inside its background can only find the trailer through the 2nd pass (via the background).
+// phase 106 (S21 = S8 with REPEATING loose keys; truck trailer plate ghosting, VR captures shimmer_20261114_1756xx): g_s8KeyRep 1 =
+// the dyn quads keep the SAME (startIndex, baseVertex) every frame, 2 = the same within each run of 4 frames (new keys every 4th
+// frame) -- the VB still rotates (3 pool buffers), so only the LOOSE key (ic, startIndex, baseVertex, VS) repeats, as the game's
+// dynamic-VB plates whose offsets repeat. Such a view-space plate PAIRS by its loose key; its MVP is the bare projection =
+// ORIGIN-FREE (column 3 (0, 0, c, 0)), and before phase 106 ResolveDraw forced it static (the camera R) and it was never listed
+// for the rigid-parent vote: the plates on the turning trailer / far van MUST FAIL with "mut106" (SetParentMutation bit 7). The
+// static view-space draws (parked trailer's plate, gantry sign next to the passing truck) = a small origin-free STATIC draw: they
+// must stay static. The forward plate (own node matrix) pairs by its own matrix here: a mover by its own pair (no parent needed).
+int g_s8KeyRep = 0;
+int g_mut106 = 0;          // phase 106 "mut106": SetParentMutation bit 7 (the phase-106 rule off) -- S21 must FAIL
 int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx = 0, Shadow* const* sh = nullptr, int nSh = 0) {
     const int frames = 100;
+    const int keyRep = g_s8KeyRep;                      // phase 106 (S21)
+    if (keyRep) printf("\n===== S21 (phase 106) = S8 with REPEATING loose keys (%s): the view-space plates PAIR by their loose key and "
+                       "are origin-free (bare projection)%s =====", keyRep == 1 ? "every frame" : "within runs of 4 frames",
+                       g_mut106 ? ", MUTATION mut106: the phase-106 rule off" : "");
     printf("\n===== S8 rigid parents: view-space plate + text (chain) and a node-matrix forward plate on a TURNING trailer, a "
            "parked trailer's view-space plate, a static view-space sign next to a passing truck; phase 6c: far 24x8 px plate, "
            "instanced background + text, plate on the trailer's bottom edge (%d frames, snap %.3f px%s%s) =====\n",
@@ -3433,7 +3459,7 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
     DrawIdMv::SetAttach(0.5f);
     DrawIdMv::SetTwin(true);
     DrawIdMv::SetParent(mut != 1);
-    DrawIdMv::SetParentMutation(mut == 2 ? 1 : (mut == 3 ? 2 : 0));
+    DrawIdMv::SetParentMutation((mut == 2 ? 1 : (mut == 3 ? 2 : 0)) | g_mut106);   // (phase 106: + bit 7 "mut106")
     DrawIdMv::SetInstanced(true);                       // v0.10.0 phase 6b: instanced draws join the vote in S8 (S1-S7 leave it off)
     View v;
     S6Res r;
@@ -3628,7 +3654,8 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
         for (int k = 0; k < 4; ++k) world[oGn[k]] = T(1.9, 0.35, 24.0 + 7.0 * k);   // phase 14 round 4 (static, beside the truck)
         for (int o = 0; o < nObj; ++o) mvpCur[o] = Mul(Pw, Mul(V, world[o]));
         // the dyn quads: view-space vertices (V * world * corner) or node-frame vertices (forward plate)
-        const int slotBase = (5 * f) % 16;
+        const int kf = keyRep == 1 ? 0 : (keyRep == 2 ? f / 4 : f);   // phase 106: the key frame (S21: keys repeat)
+        const int slotBase = (5 * kf) % 16;
         {
             D3D11_MAPPED_SUBRESOURCE mp{};
             if (FAILED(ctx->Map(dynPool[f % 3].Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { printf("dyn VB map failed\n"); return 1; }
@@ -3692,7 +3719,7 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
         };
         auto drawArgs = [&](int o, UINT* ic, UINT* si, INT* bv) {
             if (dynOf[o] >= 0) {                                         // keys new every frame (VB, startIndex, baseVertex)
-                *ic = 6; *si = (UINT)(((3 * f) % 8) * 6);
+                *ic = 6; *si = (UINT)(((3 * kf) % 8) * 6);
                 *bv = (INT)((((slotBase + dynOf[o]) % 16) * kDyn + dynOf[o]) * 4);
                 return;
             }
@@ -3839,7 +3866,14 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
             };
             parentCheck(oBg, oTrl, DrawIdMv::kStMover);
             parentCheck(oTx, oTrl, DrawIdMv::kStMover);
-            parentCheck(oFp, oTrl, DrawIdMv::kStMover);
+            if (keyRep) {                                // phase 106 (S21): the forward node-matrix plate pairs by its own matrix
+                // (keyRep 2, the 1st frame of a repeated key = f % 4 == 1: its pair is a CONTINUITY REJECT -- an ambiguous loose
+                // group whose previous draw has no track yet -- state 1 for that frame by design (the header of ResolveDraw);
+                // its pixels still move with the trailer: the per-pixel forward attach, checked per pixel above)
+                ++parFrames[objs[oFp].group];
+                if (stCur[oFp] == DrawIdMv::kStMover || (keyRep == 2 && f % 4 == 1 && stCur[oFp] == DrawIdMv::kStUnpaired))
+                    ++parOk[objs[oFp].group];
+            } else parentCheck(oFp, oTrl, DrawIdMv::kStMover);
             parentCheck(oInstP, oTrl, DrawIdMv::kStMover);   // v0.10.0 phase 6b: the instanced plate moves with the trailer
             ++parkFrames;
             if (stCur[oPp] == DrawIdMv::kStMover) ++parkMover;
@@ -3852,7 +3886,7 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
             if (f == kHoldFrame && !nSh) {               // phase 14 round 4: the plates kept the trailer through the hold
                 for (int o : { oBg, oTx, oFp, oInstP, oTkBg, oTkTx, oBot }) {
                     ++holdChecked;
-                    if (stCur[o] == DrawIdMv::kStMover && parentOf[o] == tabIdx[oTrl]) ++holdOk;
+                    if (stCur[o] == DrawIdMv::kStMover && (parentOf[o] == tabIdx[oTrl] || (keyRep && o == oFp))) ++holdOk;
                     else printf("   FAIL frame %d (trailer not replayed): %s state %d parent %d, want the trailer (%d)\n", f,
                                 objs[o].name, stCur[o], parentOf[o], tabIdx[oTrl]);
                 }
@@ -4092,7 +4126,7 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
     }
     // phase 6c: the plate text now finds the trailer in the 1st pass (it marches through its background); the 2nd pass ("chain")
     // is required only in the short-reach run, where the text cannot leave its background
-    if (mut != 1 && !(ds.parents > 0 && ds.parMovers > 0 && (reachPx == 0 || ds.parChain > 0) && ds.parFwd > 0)) {
+    if (mut != 1 && !(ds.parents > 0 && ds.parMovers > 0 && (reachPx == 0 || ds.parChain > 0) && (keyRep || ds.parFwd > 0))) {
         ++fails; printf("   FAIL parent counters: parents %llu, movers %llu, chain (2nd pass) %llu, forward %llu\n",
                         (unsigned long long)ds.parents, (unsigned long long)ds.parMovers, (unsigned long long)ds.parChain,
                         (unsigned long long)ds.parFwd);
@@ -4123,6 +4157,19 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
     if (mut == 0) {
         ++checks;
         if (ds.dumps != 1) { ++fails; printf("   FAIL the per-draw dump requested at frame 40 landed %llu times (want 1)\n", (unsigned long long)ds.dumps); }
+    }
+    // phase 106: paired origin-free SMALL draws left for the vote (Cnt [245..247]). S8 (keys new every frame): none -- its
+    // view-space plates never pair. S21: the scene must exercise the rule (some listed, some took the trailer / van motion);
+    // with "mut106" none (the rule off: they are resolved static and the per-pixel / parent checks above FAIL)
+    printf("   phase 106 (read back): paired origin-free small draws left for the vote %llu (listed %llu, took a moving parent %llu); "
+           "origin-free paired draws %llu\n", (unsigned long long)ds.originSmall, (unsigned long long)ds.originSmallListed,
+           (unsigned long long)ds.originSmallMover, (unsigned long long)ds.originFree);
+    checks += 1;
+    if (!keyRep || g_mut106) {
+        if (ds.originSmall != 0) { ++fails; printf("   FAIL phase 106: %llu origin-free small draws listed (want 0 here)\n", (unsigned long long)ds.originSmall); }
+    } else if (!(ds.originSmall > 0 && ds.originSmallListed > 0 && ds.originSmallMover > 0)) {
+        ++fails; printf("   FAIL phase 106: the scene does not exercise the rule (left %llu, listed %llu, moving parent %llu)\n",
+                        (unsigned long long)ds.originSmall, (unsigned long long)ds.originSmallListed, (unsigned long long)ds.originSmallMover);
     }
     printf("   camera R vs exact: worst %.4f px (limit 0.05), bad frames %d; consensus in %d of %d frames; trailer yaw rate up to %.4f "
            "rad / frame\n", worstCamPx, camRBad, consFrames, frames, yawRate);
@@ -5010,9 +5057,9 @@ int RunSolidUnit(Env& E, Totals& tot) {
     static const char kVs[] =
         "cbuffer C : register(b0) { float4 g_r; };\n"   // x = half thickness px (ribbon) or < 0 = full-screen quad
         "struct VA { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float2 t2 : TEXCOORD2; };\n"
-        "struct VAK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float2 t2 : TEXCOORD2; float4 kf : TEXCOORD7; };\n"
+        "struct VAK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float2 t2 : TEXCOORD2; float4 kf : TEXCOORD7; noperspective float2 dl : TEXCOORD8; };\n"
         "struct VB { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; };\n"
-        "struct VBK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; float4 kf : TEXCOORD7; };\n"
+        "struct VBK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; float4 kf : TEXCOORD7; noperspective float2 dl : TEXCOORD8; };\n"
         "VB Make(uint i) { float2 q = float2((i == 1 || i == 3 || i == 4) ? 1 : 0, (i == 2 || i == 4 || i == 5) ? 1 : 0);\n"
         "  VB o = (VB)0;\n"
         "  if (g_r.x < 0) o.pos = float4(q.x * 2 - 1, 1 - q.y * 2, 0.5, 1);\n"
@@ -5025,9 +5072,9 @@ int RunSolidUnit(Env& E, Totals& tot) {
         "  o.t0 = float3(0.2 + q.x, 1.0 - 0.4 * q.y, 0.3 * q.x - 0.1); o.t1 = float3(5.0 * q.x, 3.0 * q.y, 120.0 + 40.0 * q.x);\n"
         "  o.t2 = float4(q.x * 3.0, q.y * 2.0, q.y * 1.5, q.x * 2.5); o.t3 = float2(q.y * 2.2, q.x * 1.7); return o; }\n"
         "VA vsA(uint i : SV_VertexID) { VB b = Make(i); VA o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2.xy; return o; }\n"
-        "VAK vsAK(uint i : SV_VertexID) { VB b = Make(i); VAK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2.xy; o.kf = float4(1, 0, 1, 0); return o; }\n"
+        "VAK vsAK(uint i : SV_VertexID) { VB b = Make(i); VAK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2.xy; o.kf = float4(1, 0, 1, 0); o.dl = float2(0, 0); return o; }\n"
         "VB vsB(uint i : SV_VertexID) { return Make(i); }\n"
-        "VBK vsBK(uint i : SV_VertexID) { VB b = Make(i); VBK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2; o.t3 = b.t3; o.kf = float4(1, 0, 1, 0); return o; }\n";
+        "VBK vsBK(uint i : SV_VertexID) { VB b = Make(i); VBK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2; o.t3 = b.t3; o.kf = float4(1, 0, 1, 0); o.dl = float2(0, 0); return o; }\n";
     size_t gl = 0, pl = 0;
     const char* gsrc = WireWiden::SolidGsSource(&gl);
     const char* psrc = WireWiden::SolidPsSource(&pl);
@@ -5270,15 +5317,565 @@ int RunSolidUnit(Env& E, Totals& tot) {
     return fails;
 }
 
+// phase 107b: the new solid pairs (ETS2). (a) the dither copies at k = 1 against the game's real bytecode, all 4 targets bit for bit
+// (captures\ps_57a4e1f1.dxbc = cranes, pair C; ps_2d7ed0e6.dxbc = railings with the t6.a < 0.05 discard, pair D; ps_d3af2ebb.dxbc =
+// ETS2 street lights, pair E; saved by scripts\rdc_dump_draw_shaders.py, game data: skipped without them). The textures include
+// t6 alpha below the cut (the discard must match pixel for pixel), cb0[0].x has its raw bit 0 set (pair C's bfi on the raw bits),
+// COLOR.w spans both signs (pair D / E's cb0[4] pick). (b) signatures: the three game VSs of pair D / E share one output signature,
+// GSolidD's input = that signature, pair C's PS input = pair A's (GSolidA fits). (c) the kind -> GS mapping (the phase-64 replay
+// stamp: kinds 1..5 -> 2 / 3 / 2 / 4 / 4, never past GSolidD). (d) GSolidD + PSSolidD / PSSolidE and GSolidA + PSSolidC on a 0.06 px
+// ribbon over 64 frames: every column, the mean coverage = the width; a 3 px ribbon exactly unchanged.
+struct SigEl { std::string name; uint32_t idx, sv, ct, reg, mask; };
+static std::vector<SigEl> DxbcSig(const void* code, size_t len, const char* tag) {
+    std::vector<SigEl> out;
+    const unsigned char* b = static_cast<const unsigned char*>(code);
+    if (!b || len < 32 || memcmp(b, "DXBC", 4) != 0) return out;
+    uint32_t n; memcpy(&n, b + 28, 4);
+    for (uint32_t i = 0; i < n && 32 + 4 * i + 4 <= len; ++i) {
+        uint32_t off; memcpy(&off, b + 32 + 4 * i, 4);
+        if (off + 8 > len || memcmp(b + off, tag, 4) != 0) continue;
+        const unsigned char* c = b + off + 8;
+        uint32_t cnt; memcpy(&cnt, c, 4);
+        for (uint32_t e = 0; e < cnt; ++e) {
+            uint32_t no, w[4]; memcpy(&no, c + 8 + 24 * e, 4); memcpy(w, c + 12 + 24 * e, 16);
+            SigEl s; s.name = (const char*)(c + no); s.idx = w[0]; s.sv = w[1]; s.ct = w[2]; s.reg = w[3]; s.mask = c[8 + 24 * e + 20];
+            out.push_back(s);
+        }
+    }
+    return out;
+}
+static bool SigEq(const std::vector<SigEl>& a, const std::vector<SigEl>& b) {
+    if (a.empty() || a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (a[i].name != b[i].name || a[i].idx != b[i].idx || a[i].sv != b[i].sv || a[i].ct != b[i].ct || a[i].reg != b[i].reg ||
+            a[i].mask != b[i].mask) return false;
+    return true;
+}
+int RunSolid107Unit(Env& E, Totals& tot) {
+    printf("\n===== S107 unit: phase 107b solid pairs (ETS2 cranes / railings / street lights) -- copies vs the game's PSs, GSolidD =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    ID3D11Device* d = E.dev.Get();
+    ID3D11DeviceContext* c = E.ctx.Get();
+    // (c) the kind mapping (no D3D)
+    {
+        const int want[11] = { 0, 2, 3, 2, 4, 4, 5, 2, 2, 2, 0 };   // phase 109d / e: F -> GSolidF (5), G / H -> GSolidA (2); 111: I -> 2
+        bool ok = true;
+        for (int k = 0; k <= 10; ++k) ok &= WireWiden::SolidReplayKind(k) == want[k];
+        ok &= WireWiden::SolidGsOf(WireWiden::kSolidC) == WireWiden::SolidGsOf(WireWiden::kSolidA);
+        ok &= WireWiden::SolidGsOf(WireWiden::kSolidD) == 2 && WireWiden::SolidGsOf(WireWiden::kSolidE) == 2;
+        ok &= WireWiden::SolidGsOf(WireWiden::kSolidF) == 3 && WireWiden::SolidGsOf(WireWiden::kSolidG) == 0 &&
+              WireWiden::SolidGsOf(WireWiden::kSolidH) == 0 && WireWiden::SolidGsOf(WireWiden::kSolidI) == 0;
+        ok &= WireWiden::SolidGsOf(0) < 0 && WireWiden::SolidGsOf(10) < 0;
+        printf("   replay GS kinds for solid kinds 0..10: %d %d %d %d %d %d %d %d %d %d %d (want 0 2 3 2 4 4 5 2 2 2 0)\n",
+               WireWiden::SolidReplayKind(0), WireWiden::SolidReplayKind(1), WireWiden::SolidReplayKind(2), WireWiden::SolidReplayKind(3),
+               WireWiden::SolidReplayKind(4), WireWiden::SolidReplayKind(5), WireWiden::SolidReplayKind(6), WireWiden::SolidReplayKind(7),
+               WireWiden::SolidReplayKind(8), WireWiden::SolidReplayKind(9), WireWiden::SolidReplayKind(10));
+        expect(ok, "solid kind -> GS mapping (C / G / H / I share GSolidA, D / E GSolidD, F GSolidF, replay kinds 2..5 only)");
+    }
+    static const char kVs[] =
+        "cbuffer C : register(b0) { float4 g_r; };\n"   // x = half thickness px (ribbon) or < 0 = full-screen quad
+        "struct VA { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float2 t2 : TEXCOORD2; };\n"
+        "struct VAK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float2 t2 : TEXCOORD2; float4 kf : TEXCOORD7; noperspective float2 dl : TEXCOORD8; };\n"
+        "struct VD { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float3 t2 : TEXCOORD2;\n"
+        "            float3 t3 : TEXCOORD3; float4 t4 : TEXCOORD4; float2 t5 : TEXCOORD5; };\n"
+        "struct VDK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float3 t2 : TEXCOORD2;\n"
+        "             float3 t3 : TEXCOORD3; float4 t4 : TEXCOORD4; float2 t5 : TEXCOORD5; float4 kf : TEXCOORD7; noperspective float2 dl : TEXCOORD8; };\n"
+        "VD Make(uint i) { float2 q = float2((i == 1 || i == 3 || i == 4) ? 1 : 0, (i == 2 || i == 4 || i == 5) ? 1 : 0);\n"
+        "  VD o = (VD)0;\n"
+        "  if (g_r.x < 0) o.pos = float4(q.x * 2 - 1, 1 - q.y * 2, 0.5, 1);\n"
+        "  else { const float2 P[6] = { float2(8, -1), float2(8, 1), float2(120, -1), float2(8, 1), float2(120, 1), float2(120, -1) };\n"
+        "         float2 r = P[i]; float y = g_r.y + r.y * g_r.x + (r.x - 8.0) / 112.0 * 1.3;\n"
+        "         o.pos = float4(r.x / 64.0 - 1.0, 1.0 - y / 32.0, 0.5, 1); q = float2(r.x / 128.0, y / 64.0); }\n"
+        "  o.col = float4(0.3 + 0.6 * q.x, 0.8 - 0.5 * q.y, 0.2 + 0.3 * q.x * q.y, 0.1 + 0.8 * q.y);\n"   // col.w: 2w - 1 spans both signs
+        "  o.t0 = float3(0.2 + q.x, 1.0 - 0.4 * q.y, 0.3 * q.x - 0.1); o.t1 = float3(0.5 - q.y, 0.3 + q.x, 0.9 - 0.2 * q.x);\n"
+        "  o.t2 = float3(5.0 * q.x, 3.0 * q.y, 120.0 + 40.0 * q.x); o.t3 = float3(0.7 * q.y, -0.4 + q.x, 0.25);\n"
+        "  o.t4 = float4(q.x * 3.0, q.y * 2.0, q.y * 1.5, q.x * 2.5); o.t5 = float2(q.y * 2.2, q.x * 1.7); return o; }\n"
+        "VA vsA(uint i : SV_VertexID) { VD b = Make(i); VA o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t2; o.t2 = b.t4.xy; return o; }\n"
+        "VAK vsAK(uint i : SV_VertexID) { VA a = vsA(i); VAK o; o.col = a.col; o.pos = a.pos; o.t0 = a.t0; o.t1 = a.t1; o.t2 = a.t2; o.kf = float4(1, 0, 1, 0); o.dl = float2(0, 0); return o; }\n"
+        "VD vsD(uint i : SV_VertexID) { return Make(i); }\n"
+        "struct VF { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float3 t2 : TEXCOORD2;\n"
+        "            float3 t3 : TEXCOORD3; float4 t4 : TEXCOORD4; float4 t5 : TEXCOORD5; };\n"
+        "struct VFK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float3 t2 : TEXCOORD2;\n"
+        "             float3 t3 : TEXCOORD3; float4 t4 : TEXCOORD4; float4 t5 : TEXCOORD5; float4 kf : TEXCOORD7; noperspective float2 dl : TEXCOORD8; };\n"
+        "VF vsF(uint i : SV_VertexID) { VD b = Make(i); VF o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2; o.t3 = b.t3;\n"
+        "  o.t4 = b.t4; o.t5 = float4(b.t5, b.t4.x * 0.7 + 0.1, b.t4.y * 1.9 - 0.2); return o; }\n"
+        "VFK vsFK(uint i : SV_VertexID) { VF b = vsF(i); VFK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2; o.t3 = b.t3;\n"
+        "  o.t4 = b.t4; o.t5 = b.t5; o.kf = float4(1, 0, 1, 0); o.dl = float2(0, 0); return o; }\n"
+        "VDK vsDK(uint i : SV_VertexID) { VD b = Make(i); VDK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2; o.t3 = b.t3;\n"
+        "  o.t4 = b.t4; o.t5 = b.t5; o.kf = float4(1, 0, 1, 0); o.dl = float2(0, 0); return o; }\n";
+    size_t gl = 0, pl = 0;
+    const char* gsrc = WireWiden::SolidGsSource(&gl);
+    const char* psrc = WireWiden::SolidPsSource(&pl);
+    ComPtr<ID3DBlob> bA, bAK, bD, bDK, gA, gD, pC, pD, pE, err;
+    ComPtr<ID3DBlob> bF, bFK, gF, pF, pG, pH, pI;                 // phase 109d / e (111: + I)
+    bool ok = SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s107", nullptr, nullptr, "vsA", "vs_5_0", 0, 0, &bA, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s107", nullptr, nullptr, "vsAK", "vs_5_0", 0, 0, &bAK, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s107", nullptr, nullptr, "vsD", "vs_5_0", 0, 0, &bD, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s107", nullptr, nullptr, "vsDK", "vs_5_0", 0, 0, &bDK, &err)) &&
+              SUCCEEDED(D3DCompile(gsrc, gl, "solid_gs", nullptr, nullptr, "GSolidA", "gs_5_0", 0, 0, &gA, &err)) &&
+              SUCCEEDED(D3DCompile(gsrc, gl, "solid_gs", nullptr, nullptr, "GSolidD", "gs_5_0", 0, 0, &gD, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidC", "ps_5_0", 0, 0, &pC, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidD", "ps_5_0", 0, 0, &pD, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidE", "ps_5_0", 0, 0, &pE, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s107", nullptr, nullptr, "vsF", "vs_5_0", 0, 0, &bF, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s107", nullptr, nullptr, "vsFK", "vs_5_0", 0, 0, &bFK, &err)) &&
+              SUCCEEDED(D3DCompile(gsrc, gl, "solid_gs", nullptr, nullptr, "GSolidF", "gs_5_0", 0, 0, &gF, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidF", "ps_5_0", 0, 0, &pF, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidG", "ps_5_0", 0, 0, &pG, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidH", "ps_5_0", 0, 0, &pH, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidI", "ps_5_0", 0, 0, &pI, &err));   // phase 111
+    if (!ok && err) printf("   compile: %s\n", (const char*)err->GetBufferPointer());
+    ComPtr<ID3D11VertexShader> vA, vAK, vD, vDK; ComPtr<ID3D11GeometryShader> gsA, gsD; ComPtr<ID3D11PixelShader> cpC, cpD, cpE;
+    ComPtr<ID3D11VertexShader> vF, vFK; ComPtr<ID3D11GeometryShader> gsF; ComPtr<ID3D11PixelShader> cpF, cpG, cpH, cpI;   // phase 109d / e, 111
+    ok = ok && SUCCEEDED(d->CreateVertexShader(bA->GetBufferPointer(), bA->GetBufferSize(), nullptr, &vA)) &&
+         SUCCEEDED(d->CreateVertexShader(bAK->GetBufferPointer(), bAK->GetBufferSize(), nullptr, &vAK)) &&
+         SUCCEEDED(d->CreateVertexShader(bD->GetBufferPointer(), bD->GetBufferSize(), nullptr, &vD)) &&
+         SUCCEEDED(d->CreateVertexShader(bDK->GetBufferPointer(), bDK->GetBufferSize(), nullptr, &vDK)) &&
+         SUCCEEDED(d->CreateGeometryShader(gA->GetBufferPointer(), gA->GetBufferSize(), nullptr, &gsA)) &&
+         SUCCEEDED(d->CreateGeometryShader(gD->GetBufferPointer(), gD->GetBufferSize(), nullptr, &gsD)) &&
+         SUCCEEDED(d->CreatePixelShader(pC->GetBufferPointer(), pC->GetBufferSize(), nullptr, &cpC)) &&
+         SUCCEEDED(d->CreatePixelShader(pD->GetBufferPointer(), pD->GetBufferSize(), nullptr, &cpD)) &&
+         SUCCEEDED(d->CreatePixelShader(pE->GetBufferPointer(), pE->GetBufferSize(), nullptr, &cpE)) &&
+         SUCCEEDED(d->CreateVertexShader(bF->GetBufferPointer(), bF->GetBufferSize(), nullptr, &vF)) &&
+         SUCCEEDED(d->CreateVertexShader(bFK->GetBufferPointer(), bFK->GetBufferSize(), nullptr, &vFK)) &&
+         SUCCEEDED(d->CreateGeometryShader(gF->GetBufferPointer(), gF->GetBufferSize(), nullptr, &gsF)) &&
+         SUCCEEDED(d->CreatePixelShader(pF->GetBufferPointer(), pF->GetBufferSize(), nullptr, &cpF)) &&
+         SUCCEEDED(d->CreatePixelShader(pG->GetBufferPointer(), pG->GetBufferSize(), nullptr, &cpG)) &&
+         SUCCEEDED(d->CreatePixelShader(pH->GetBufferPointer(), pH->GetBufferSize(), nullptr, &cpH)) &&
+         SUCCEEDED(d->CreatePixelShader(pI->GetBufferPointer(), pI->GetBufferSize(), nullptr, &cpI));
+    // (b) signatures (game data when present)
+    {
+        std::vector<char> v1, v2, v3, psA, psC;
+        if (LoadFile("vs_3847be86.dxbc", v1) && LoadFile("vs_9d2904cd.dxbc", v2) && LoadFile("vs_d87f5280.dxbc", v3)) {
+            expect(WireWiden::ChecksumIs(v1.data(), v1.size(), WireWiden::kSolidVsD) &&
+                   WireWiden::ChecksumIs(v2.data(), v2.size(), WireWiden::kSolidVsD2) &&
+                   WireWiden::ChecksumIs(v3.data(), v3.size(), WireWiden::kSolidVsD3), "the pair D / E VS files carry kSolidVsD / D2 / D3");
+            const std::vector<SigEl> o1 = DxbcSig(v1.data(), v1.size(), "OSGN"), o2 = DxbcSig(v2.data(), v2.size(), "OSGN"),
+                                     o3 = DxbcSig(v3.data(), v3.size(), "OSGN");
+            const std::vector<SigEl> gi = ok ? DxbcSig(gD->GetBufferPointer(), gD->GetBufferSize(), "ISGN") : std::vector<SigEl>();
+            printf("   pair D / E: VS 3847be86 / 9d2904cd / d87f5280 output signatures %zu / %zu / %zu elements, %s; GSolidD input %s\n",
+                   o1.size(), o2.size(), o3.size(), SigEq(o1, o2) && SigEq(o1, o3) ? "identical" : "DIFFERENT",
+                   SigEq(o1, gi) ? "= that signature" : "DIFFERS");
+            expect(SigEq(o1, o2) && SigEq(o1, o3), "the three pair D / E VSs share one output signature");
+            expect(SigEq(o1, gi), "GSolidD's input signature = the game VSs' output (name, index, register, type, mask)");
+        } else printf("   (captures\\vs_3847be86 / 9d2904cd / d87f5280.dxbc not found: signature checks D skipped)\n");
+        if (LoadFile("ps_b67da69f.dxbc", psA) && LoadFile("ps_57a4e1f1.dxbc", psC)) {
+            expect(WireWiden::ChecksumIs(psC.data(), psC.size(), WireWiden::kSolidPsC), "ps_57a4e1f1.dxbc has the checksum kSolidPsC");
+            const bool same = SigEq(DxbcSig(psA.data(), psA.size(), "ISGN"), DxbcSig(psC.data(), psC.size(), "ISGN"));
+            printf("   pair C: PS 57a4e1f1 input signature %s pair A's b67da69f (GSolidA %s)\n", same ? "=" : "DIFFERS from", same ? "fits" : "does NOT fit");
+            expect(same, "pair C's PS input = pair A's (GSolidA's output fits)");
+        } else printf("   (captures\\ps_b67da69f / ps_57a4e1f1.dxbc not found: signature check C skipped)\n");
+        // phase 109d / e
+        std::vector<char> vsF0, vsA0, vsA2, psG0, psH0, psF0;
+        if (LoadFile("vs_e5a4956d.dxbc", vsF0) && LoadFile("ps_2cc0a6fa.dxbc", psF0)) {
+            expect(WireWiden::ChecksumIs(vsF0.data(), vsF0.size(), WireWiden::kSolidVsF) &&
+                   WireWiden::ChecksumIs(psF0.data(), psF0.size(), WireWiden::kSolidPsF), "pair F files carry kSolidVsF / kSolidPsF");
+            const std::vector<SigEl> o = DxbcSig(vsF0.data(), vsF0.size(), "OSGN");
+            const std::vector<SigEl> gi = ok ? DxbcSig(gF->GetBufferPointer(), gF->GetBufferSize(), "ISGN") : std::vector<SigEl>();
+            const std::vector<SigEl> pi = DxbcSig(psF0.data(), psF0.size(), "ISGN");
+            const std::vector<SigEl> po = ok ? DxbcSig(pF->GetBufferPointer(), pF->GetBufferSize(), "ISGN") : std::vector<SigEl>();
+            printf("   pair F: VS e5a4956d output %zu elements, GSolidF input %s, PS 2cc0a6fa input %s\n", o.size(),
+                   SigEq(o, gi) ? "= it" : "DIFFERS", SigEq(o, pi) ? "= it" : "DIFFERS");
+            expect(SigEq(o, gi), "GSolidF's input signature = VS e5a4956d's output");
+            expect(SigEq(o, pi), "PS 2cc0a6fa's input = VS e5a4956d's output (the game's own pairing)");
+            (void)po;
+        } else printf("   (captures\\vs_e5a4956d / ps_2cc0a6fa.dxbc not found: pair F signature checks skipped)\n");
+        if (LoadFile("vs_07dfaa00.dxbc", vsA0) && LoadFile("vs_ccd6b6d1.dxbc", vsA2)) {
+            expect(WireWiden::ChecksumIs(vsA2.data(), vsA2.size(), WireWiden::kSolidVsA2), "vs_ccd6b6d1 carries kSolidVsA2");
+            const bool same = SigEq(DxbcSig(vsA0.data(), vsA0.size(), "OSGN"), DxbcSig(vsA2.data(), vsA2.size(), "OSGN"));
+            printf("   VS ccd6b6d1 output signature %s VS 07dfaa00's (pair A's VS set)\n", same ? "=" : "DIFFERS from");
+            expect(same, "VS ccd6b6d1's output = 07dfaa00's (it joins pair A's VS set)");
+        }
+        // phase 111 (the 2026-11-15 Norway census capture): the instanced road-pole / delineator VS 2a9f326e and the skinned VS
+        // 7fcd07d6 join pair A's VS set; PS 2585159b (kind I) takes pair A's input
+        {
+            std::vector<char> v3, v4, pI0, pA0;
+            if (LoadFile("vs_07dfaa00.dxbc", vsA0) && LoadFile("vs_2a9f326e.dxbc", v3) && LoadFile("vs_7fcd07d6.dxbc", v4)) {
+                expect(WireWiden::ChecksumIs(v3.data(), v3.size(), WireWiden::kSolidVsA3) &&
+                       WireWiden::ChecksumIs(v4.data(), v4.size(), WireWiden::kSolidVsA4), "vs_2a9f326e / vs_7fcd07d6 carry kSolidVsA3 / A4");
+                const std::vector<SigEl> o0 = DxbcSig(vsA0.data(), vsA0.size(), "OSGN");
+                const bool s3 = SigEq(o0, DxbcSig(v3.data(), v3.size(), "OSGN")), s4 = SigEq(o0, DxbcSig(v4.data(), v4.size(), "OSGN"));
+                // byte for byte too (the whole OSGN chunk)
+                auto chunk = [](const std::vector<char>& b) {
+                    std::string r;
+                    if (b.size() < 32) return r;
+                    uint32_t n = 0; memcpy(&n, b.data() + 28, 4);
+                    for (uint32_t i = 0; i < n && 32 + 4 * i + 4 <= b.size(); ++i) {
+                        uint32_t off = 0, sz = 0; memcpy(&off, b.data() + 32 + 4 * i, 4);
+                        if (off + 8 > b.size() || memcmp(b.data() + off, "OSGN", 4)) continue;
+                        memcpy(&sz, b.data() + off + 4, 4);
+                        if (off + 8 + sz <= b.size()) r.assign(b.data() + off + 8, sz);
+                    }
+                    return r;
+                };
+                const bool b3 = !chunk(vsA0).empty() && chunk(vsA0) == chunk(v3), b4 = chunk(vsA0) == chunk(v4);
+                printf("   phase 111: VS 2a9f326e / 7fcd07d6 output signature %s / %s VS 07dfaa00's (OSGN bytes %s / %s)\n", s3 ? "=" : "DIFFERS from",
+                       s4 ? "=" : "DIFFERS from", b3 ? "identical" : "differ", b4 ? "identical" : "differ");
+                expect(s3 && s4 && b3 && b4, "VS 2a9f326e / 7fcd07d6: output = 07dfaa00's byte for byte (they join pair A's VS set)");
+            } else printf("   (captures\\vs_2a9f326e / vs_7fcd07d6.dxbc not found: phase 111 signature checks skipped)\n");
+            // phase 113 (the 2026-11-15 14:54 capture, Volvo Trucks Center): VS bdce664b draws kind I's PS 2585159b -> pair A's VS set
+            std::vector<char> v5;
+            if (LoadFile("vs_07dfaa00.dxbc", vsA0) && LoadFile("vs_bdce664b.dxbc", v5)) {
+                expect(WireWiden::ChecksumIs(v5.data(), v5.size(), WireWiden::kSolidVsA5), "vs_bdce664b carries kSolidVsA5");
+                const bool s5 = SigEq(DxbcSig(vsA0.data(), vsA0.size(), "OSGN"), DxbcSig(v5.data(), v5.size(), "OSGN"));
+                auto osgn = [](const std::vector<char>& b) {
+                    std::string r;
+                    if (b.size() < 32) return r;
+                    uint32_t n = 0; memcpy(&n, b.data() + 28, 4);
+                    for (uint32_t i = 0; i < n && 32 + 4 * i + 4 <= b.size(); ++i) {
+                        uint32_t off = 0, sz = 0; memcpy(&off, b.data() + 32 + 4 * i, 4);
+                        if (off + 8 > b.size() || memcmp(b.data() + off, "OSGN", 4)) continue;
+                        memcpy(&sz, b.data() + off + 4, 4);
+                        if (off + 8 + sz <= b.size()) r.assign(b.data() + off + 8, sz);
+                    }
+                    return r;
+                };
+                const bool b5 = !osgn(vsA0).empty() && osgn(vsA0) == osgn(v5);
+                printf("   phase 113: VS bdce664b output signature %s VS 07dfaa00's (OSGN bytes %s)\n", s5 ? "=" : "DIFFERS from",
+                       b5 ? "identical" : "differ");
+                expect(s5 && b5, "VS bdce664b: output = 07dfaa00's byte for byte (it joins pair A's VS set: kind I covers it)");
+                ComPtr<ID3D11VertexShader> o5;
+                expect(SUCCEEDED(d->CreateVertexShader(v5.data(), v5.size(), nullptr, &o5)) && o5, "VS bdce664b loads");
+                if (o5) {
+                    WireWiden::NoteVs(o5.Get(), v5.data(), v5.size());
+                    expect(WireWiden::IsSolidVs(o5.Get(), WireWiden::kSolidI) && WireWiden::IsSolidVs(o5.Get(), WireWiden::kSolidA) &&
+                           !WireWiden::IsSolidVs(o5.Get(), WireWiden::kSolidD), "VS bdce664b: in pair A's set (kinds A / I), not pair D's");
+                }
+            } else printf("   (captures\\vs_bdce664b.dxbc not found: phase 113 signature check skipped)\n");
+            if (LoadFile("ps_b67da69f.dxbc", pA0) && LoadFile("ps_2585159b.dxbc", pI0)) {
+                const bool si = SigEq(DxbcSig(pA0.data(), pA0.size(), "ISGN"), DxbcSig(pI0.data(), pI0.size(), "ISGN"));
+                printf("   phase 111: PS 2585159b input signature %s pair A's (GSolidA fits)\n", si ? "=" : "DIFFERS from");
+                expect(si, "kind I: the PS input = pair A's");
+                expect(WireWiden::SolidPsKindOfCode(pI0.data(), pI0.size()) == WireWiden::kSolidI, "SolidPsKindOfCode: I");
+            }
+        }
+        if (LoadFile("ps_b67da69f.dxbc", psA) && LoadFile("ps_cfc52d43.dxbc", psG0) && LoadFile("ps_e19e0136.dxbc", psH0)) {
+            const std::vector<SigEl> a = DxbcSig(psA.data(), psA.size(), "ISGN");
+            const bool sg = SigEq(a, DxbcSig(psG0.data(), psG0.size(), "ISGN")), sh = SigEq(a, DxbcSig(psH0.data(), psH0.size(), "ISGN"));
+            printf("   PS cfc52d43 / e19e0136 input signature %s / %s pair A's (GSolidA fits)\n", sg ? "=" : "DIFFERS from", sh ? "=" : "DIFFERS from");
+            expect(sg && sh, "kinds G / H: the PS input = pair A's (GSolidA's output fits)");
+            expect(WireWiden::SolidPsKindOfCode(psG0.data(), psG0.size()) == WireWiden::kSolidG &&
+                   WireWiden::SolidPsKindOfCode(psH0.data(), psH0.size()) == WireWiden::kSolidH, "SolidPsKindOfCode: G / H");
+        }
+    }
+    auto mkTex = [&](UINT w, UINT h, const std::vector<float>& px, ComPtr<ID3D11ShaderResourceView>& srv) {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 16u, 0 };
+        ComPtr<ID3D11Texture2D> t;
+        return SUCCEEDED(d->CreateTexture2D(&td, &sd, &t)) && SUCCEEDED(d->CreateShaderResourceView(t.Get(), nullptr, &srv));
+    };
+    std::vector<float> tx0(256 * 4), tx1(256 * 4), tx6(256 * 4), tx14(256 * 4), white(256 * 4, 1.0f);
+    for (int i = 0; i < 256; ++i)
+        for (int k = 0; k < 4; ++k) {
+            tx0[i * 4 + k] = 0.1f + 0.03f * (float)((i * 7 + k * 3) % 29);
+            tx1[i * 4 + k] = 0.05f + 0.02f * (float)((i * 5 + k * 11) % 37);
+            tx6[i * 4 + k] = 0.2f + 0.025f * (float)((i * 3 + k * 13) % 31);
+            tx14[i * 4 + k] = 0.15f + 0.023f * (float)((i * 11 + k * 5) % 31);
+        }
+    for (int i = 0; i < 256; i += 5) tx6[i * 4 + 3] = 0.01f * (float)(i % 7);   // alpha 0 .. 0.06: around the 0.05 cut
+    ComPtr<ID3D11ShaderResourceView> s0v, s1v, s6v, s14v, swv;
+    ok = ok && mkTex(16, 16, tx0, s0v) && mkTex(16, 16, tx1, s1v) && mkTex(16, 16, tx6, s6v) && mkTex(16, 16, tx14, s14v) &&
+         mkTex(16, 16, white, swv);
+    // cb0[0].x = 1.1f (raw 0x3f8ccccd: bit 0 set -> pair C's o3.w bit 13), cb0[3].x = 1 (ftou bit 0), cb0[4] = the col.w pick
+    const float cb0[5][4] = { { 1.1f, 0.9f, 1.05f, 0.35f }, { 0.6f, 0.7f, 0.8f, 0.45f }, { 0.73f, 0.0f, 0.8f, 0.1f }, { 1.0f, 0, 0, 0 },
+                              { 0.7f, 1.3f, 0, 0 } };
+    const float cbWhite[5][4] = { { 1, 1, 1, 0.5f }, { 1, 1, 1, 0.5f }, { 0.5f, 0, 1, 0 }, { 0, 0, 0, 0 }, { 1, 1, 0, 0 } };
+    D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(cb0); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_SUBRESOURCE_DATA bdat{ cb0, 0, 0 }, bdw{ cbWhite, 0, 0 };
+    ComPtr<ID3D11Buffer> cbuf, cbw, cbV, cbG;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&bd, &bdat, &cbuf)) && SUCCEEDED(d->CreateBuffer(&bd, &bdw, &cbw));
+    D3D11_BUFFER_DESC b16{}; b16.ByteWidth = 16; b16.Usage = D3D11_USAGE_DEFAULT; b16.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC b32 = b16; b32.ByteWidth = 32;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&b16, nullptr, &cbV)) && SUCCEEDED(d->CreateBuffer(&b32, nullptr, &cbG));
+    D3D11_SAMPLER_DESC smd{}; smd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; smd.AddressU = smd.AddressV = smd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    smd.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> smp[4];
+    for (int i = 0; i < 4 && ok; ++i) { smd.AddressU = (i & 1) ? D3D11_TEXTURE_ADDRESS_MIRROR : D3D11_TEXTURE_ADDRESS_WRAP; ok = SUCCEEDED(d->CreateSamplerState(&smd, &smp[i])); }
+    ComPtr<ID3D11Texture2D> rt[4], st[4]; ComPtr<ID3D11RenderTargetView> rtv[4];
+    for (int i = 0; i < 4 && ok; ++i) {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1; td.SampleDesc.Count = 1;
+        td.Format = i == 3 ? DXGI_FORMAT_R32G32B32A32_UINT : DXGI_FORMAT_R32G32B32A32_FLOAT; td.BindFlags = D3D11_BIND_RENDER_TARGET;
+        ok = SUCCEEDED(d->CreateTexture2D(&td, nullptr, &rt[i])) && SUCCEEDED(d->CreateRenderTargetView(rt[i].Get(), nullptr, &rtv[i]));
+        td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st[i]));
+    }
+    ComPtr<ID3D11RasterizerState> rsNone;
+    { D3D11_RASTERIZER_DESC rd{}; rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.DepthClipEnable = TRUE;
+      ok = ok && SUCCEEDED(d->CreateRasterizerState(&rd, &rsNone)); }
+    expect(ok, "S107 resources (GSolidD, PSSolidC / D / E compile)");
+    float bandW = 1.5f;                               // phase 113: the band width W (pole_min_px / wire_min_px) the GS gets
+    float jitY = 0.0f;                                // phase 113: the pass's jitter y (screen px) BindSolid gives pole mode
+    auto draw = [&](ID3D11VertexShader* vs, ID3D11GeometryShader* gs, ID3D11PixelShader* ps, ID3D11Buffer* cbp, float halfPx,
+                    float frame, ID3D11ShaderResourceView* t6, std::vector<uint32_t>* out, float minShare = 0.0f, float yc = 31.3f,
+                    bool clear = true, bool pole = false) {
+        c->ClearState();
+        const FLOAT sentinel[4] = { -7, -7, -7, -7 };
+        const FLOAT usentF[4] = { (FLOAT)0xBEEF, (FLOAT)0xBEEF, (FLOAT)0xBEEF, (FLOAT)0xBEEF };
+        if (clear) {
+            for (int i = 0; i < 3; ++i) c->ClearRenderTargetView(rtv[i].Get(), sentinel);
+            c->ClearRenderTargetView(rtv[3].Get(), usentF);
+        }
+        ID3D11RenderTargetView* rts[4] = { rtv[0].Get(), rtv[1].Get(), rtv[2].Get(), rtv[3].Get() };
+        c->OMSetRenderTargets(4, rts, nullptr);
+        const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0, 1 };
+        c->RSSetViewports(1, &vp);
+        c->RSSetState(rsNone.Get());
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        const float vcb[4] = { halfPx, yc, 0, 0 };
+        const float gcb[8] = { 64.0f, 32.0f, bandW, 0, frame, minShare, pole ? 1.0f : 0.0f, pole ? -jitY : 0.0f };   // (g_q.z: 109d pole mode; g_q.w: 113)
+        c->UpdateSubresource(cbV.Get(), 0, nullptr, vcb, 0, 0);
+        c->UpdateSubresource(cbG.Get(), 0, nullptr, gcb, 0, 0);
+        c->VSSetShader(vs, nullptr, 0); c->VSSetConstantBuffers(0, 1, cbV.GetAddressOf());
+        if (gs) { c->GSSetShader(gs, nullptr, 0); c->GSSetConstantBuffers(0, 1, cbG.GetAddressOf()); }
+        c->PSSetShader(ps, nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, &cbp);
+        ID3D11ShaderResourceView* v0 = s0v.Get(); ID3D11ShaderResourceView* v1 = s1v.Get(); ID3D11ShaderResourceView* v14 = s14v.Get();
+        c->PSSetShaderResources(0, 1, &v0); c->PSSetShaderResources(1, 1, &v1); c->PSSetShaderResources(6, 1, &t6);
+        c->PSSetShaderResources(14, 1, &v14);
+        ID3D11SamplerState* ss[4] = { smp[0].Get(), smp[1].Get(), smp[2].Get(), smp[3].Get() };
+        c->PSSetSamplers(0, 4, ss);
+        c->Draw(6, 0);
+        out->assign(4 * 128 * 64 * 4, 0u);
+        for (int i = 0; i < 4; ++i) {
+            c->CopyResource(st[i].Get(), rt[i].Get());
+            D3D11_MAPPED_SUBRESOURCE m{};
+            if (SUCCEEDED(c->Map(st[i].Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                for (int y = 0; y < 64; ++y) memcpy(&(*out)[((size_t)i * 64 + y) * 128 * 4], (const char*)m.pData + y * m.RowPitch, 128 * 16);
+                c->Unmap(st[i].Get(), 0);
+            }
+        }
+        c->ClearState();
+    };
+    auto drawnPx = [](const std::vector<uint32_t>& o) {   // pixels written (RT0.x not the sentinel)
+        int n = 0;
+        for (int p = 0; p < 128 * 64; ++p) { float f; memcpy(&f, &o[(size_t)p * 4], 4); n += f != -7.0f; }
+        return n;
+    };
+    if (ok) {
+        // (a) the copies vs the game's bytecode (k = 1, full-screen quad)
+        struct Pair { const char* file; const char* name; ID3D11VertexShader* vsRef; ID3D11VertexShader* vsCopy; ID3D11PixelShader* copy;
+                      const uint32_t* cks; bool discards; };
+        const Pair pairs[7] = { { "ps_57a4e1f1.dxbc", "C (cranes) 57a4e1f1", vA.Get(), vAK.Get(), cpC.Get(), WireWiden::kSolidPsC, false },
+                                { "ps_2d7ed0e6.dxbc", "D (railings) 2d7ed0e6", vD.Get(), vDK.Get(), cpD.Get(), WireWiden::kSolidPsD, true },
+                                { "ps_d3af2ebb.dxbc", "E (ETS2 street lights) d3af2ebb", vD.Get(), vDK.Get(), cpE.Get(), WireWiden::kSolidPsE, false },
+                                { "ps_2cc0a6fa.dxbc", "F (fences / town lights) 2cc0a6fa", vF.Get(), vFK.Get(), cpF.Get(), WireWiden::kSolidPsF, false },
+                                { "ps_cfc52d43.dxbc", "G (far railings) cfc52d43", vA.Get(), vAK.Get(), cpG.Get(), WireWiden::kSolidPsG, true },
+                                { "ps_e19e0136.dxbc", "H (pole stripes) e19e0136", vA.Get(), vAK.Get(), cpH.Get(), WireWiden::kSolidPsH, false },
+                                { "ps_2585159b.dxbc", "I (sign atlas) 2585159b", vA.Get(), vAK.Get(), cpI.Get(), WireWiden::kSolidPsI, false } };
+        for (const Pair& pr : pairs) {
+            std::vector<char> ref;
+            if (!LoadFile(pr.file, ref)) { printf("   (captures\\%s not found: copy check %s skipped)\n", pr.file, pr.name); continue; }
+            expect(WireWiden::ChecksumIs(ref.data(), ref.size(), pr.cks), "the reference file carries the pair's checksum");
+            ComPtr<ID3D11PixelShader> rp;
+            if (FAILED(d->CreatePixelShader(ref.data(), ref.size(), nullptr, &rp))) { expect(false, "the game bytecode loads"); continue; }
+            std::vector<uint32_t> a, b;
+            draw(pr.vsRef, nullptr, rp.Get(), cbuf.Get(), -1.0f, 0, s6v.Get(), &a);
+            draw(pr.vsCopy, nullptr, pr.copy, cbuf.Get(), -1.0f, 0, s6v.Get(), &b);
+            size_t diff = 0, first = (size_t)-1;
+            for (size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) { ++diff; if (first == (size_t)-1) first = i; }
+            const int na = drawnPx(a);
+            printf("   pair %s: the copy vs the game's PS over 128 x 64 px x 4 targets: %zu of %zu words differ%s; %d / 8192 px drawn%s\n",
+                   pr.name, diff, a.size(), diff ? "" : " (bit-exact)", na, pr.discards ? " (the rest discarded by t6.a < 0.05)" : "");
+            if (diff) printf("     first difference: target %zu word %zu: %08x vs %08x\n", first / (128 * 64 * 4), first % (128 * 64 * 4), a[first], b[first]);
+            expect(diff == 0, "the dither copy at k = 1 = the game's PS on every target, bit for bit (discards included)");
+            if (pr.discards) expect(na > 0 && na < 8192, "pair D / G: the test exercises the game's discard (some pixels cut, some drawn)");
+            if (!pr.discards) expect(na == 8192, "no discard in this PS at k = 1: every pixel drawn");
+            if (pr.copy == cpC.Get()) {   // the raw-bits o3.w: bit 13 set because 1.1f's raw bit 0 is 1 (ftou(1.1) = 1 too: also check 2.5f)
+                uint32_t w3; memcpy(&w3, &a[((size_t)3 * 64 * 128 + 0) * 4 + 3], 4);
+                printf("     pair C o3.w at cb0[0].x = 1.1f: 0x%x (want 0x3f80 = 8064 | bit 13)\n", w3);
+                expect(w3 == (8064u | 0x2000u), "pair C: o3.w = bfi(1, 13, raw bits of cb0[0].x, 8064)");
+            }
+        }
+        // (a2) pair C's o3.w on the RAW bits: cb0[0].x = 2.5f (0x40200000, bit 0 clear; ftou would give 2 -> also clear) and
+        //      3.0f (0x40400000, bit 0 clear; ftou 3 -> bit 0 SET): the copy must follow the raw bits like the game
+        {
+            std::vector<char> ref;
+            if (LoadFile("ps_57a4e1f1.dxbc", ref)) {
+                ComPtr<ID3D11PixelShader> rp;
+                d->CreatePixelShader(ref.data(), ref.size(), nullptr, &rp);
+                float cb3[5][4]; memcpy(cb3, cb0, sizeof(cb3)); cb3[0][0] = 3.0f;
+                D3D11_SUBRESOURCE_DATA s3{ cb3, 0, 0 };
+                ComPtr<ID3D11Buffer> cb3b;
+                d->CreateBuffer(&bd, &s3, &cb3b);
+                std::vector<uint32_t> a, b;
+                draw(vA.Get(), nullptr, rp.Get(), cb3b.Get(), -1.0f, 0, s6v.Get(), &a);
+                draw(vAK.Get(), nullptr, cpC.Get(), cb3b.Get(), -1.0f, 0, s6v.Get(), &b);
+                const uint32_t wa = a[((size_t)3 * 64 * 128) * 4 + 3], wb = b[((size_t)3 * 64 * 128) * 4 + 3];
+                printf("   pair C at cb0[0].x = 3.0f (raw bit 0 clear, ftou bit 0 set): game o3.w 0x%x, copy 0x%x\n", wa, wb);
+                expect(wa == wb && wa == 8064u, "pair C: o3.w uses the raw bits (3.0f -> 8064), as the game");
+            }
+        }
+        // (d) ribbons: 0.06 px over 64 frames (white t6 / textures: every band pixel passes the discard), and 3 px unchanged
+        struct Rib { const char* name; ID3D11VertexShader* vs; ID3D11VertexShader* vsK; ID3D11GeometryShader* gs; ID3D11PixelShader* ps; };
+        const Rib ribs[7] = { { "GSolidA + PSSolidC (cranes)", vA.Get(), vAK.Get(), gsA.Get(), cpC.Get() },
+                              { "GSolidD + PSSolidD (railings)", vD.Get(), vDK.Get(), gsD.Get(), cpD.Get() },
+                              { "GSolidD + PSSolidE (ETS2 street lights)", vD.Get(), vDK.Get(), gsD.Get(), cpE.Get() },
+                              { "GSolidF + PSSolidF (fences / town lights)", vF.Get(), vFK.Get(), gsF.Get(), cpF.Get() },
+                              { "GSolidA + PSSolidG (far railings)", vA.Get(), vAK.Get(), gsA.Get(), cpG.Get() },
+                              { "GSolidA + PSSolidH (pole stripes)", vA.Get(), vAK.Get(), gsA.Get(), cpH.Get() },
+                              { "GSolidA + PSSolidI (sign atlas)", vA.Get(), vAK.Get(), gsA.Get(), cpI.Get() } };
+        for (const Rib& rb : ribs) {
+            int rawCols = 0;
+            {
+                std::vector<uint32_t> o;
+                draw(rb.vsK, nullptr, rb.ps, cbw.Get(), 0.03f, 0, swv.Get(), &o);
+                for (int x = 10; x < 118; ++x) {
+                    bool any = false;
+                    for (int y = 0; y < 64; ++y) { float f; memcpy(&f, &o[((size_t)y * 128 + x) * 4], 4); if (f != -7.0f) any = true; }
+                    rawCols += any;
+                }
+            }
+            std::vector<double> avg(128, 0.0);
+            for (int fr = 0; fr < 64; ++fr) {
+                std::vector<uint32_t> o;
+                draw(rb.vs, rb.gs, rb.ps, cbw.Get(), 0.03f, (float)fr, swv.Get(), &o);
+                for (int x = 10; x < 118; ++x)
+                    for (int y = 0; y < 64; ++y) { float f; memcpy(&f, &o[((size_t)y * 128 + x) * 4], 4); if (f != -7.0f) avg[x] += 1.0 / 64.0; }
+            }
+            int cols = 0; double sum = 0;
+            for (int x = 10; x < 118; ++x) { cols += avg[x] > 0; sum += avg[x]; }
+            const double mean = sum / 108.0;
+            std::vector<uint32_t> w0, w1;
+            draw(rb.vsK, nullptr, rb.ps, cbuf.Get(), 1.5f, 5, s6v.Get(), &w0);
+            draw(rb.vs, rb.gs, rb.ps, cbuf.Get(), 1.5f, 5, s6v.Get(), &w1);
+            size_t wd = 0;
+            for (size_t i = 0; i < w0.size(); ++i) wd += w0[i] != w1[i];
+            printf("   %s: 0.06 px ribbon no GS %d / 108 columns, with GS + dither over 64 frames %d / 108, mean coverage %.3f (want ~0.06); "
+                   "3 px ribbon %zu words differ\n", rb.name, rawCols, cols, mean, wd);
+            expect(rawCols < 54, "without the GS a 0.06 px ribbon is dashes");
+            expect(cols == 108, "with the GS + dither every column gets the thin part over the frames");
+            expect(mean > 0.05 && mean < 0.07, "the average coverage per column is the ribbon's width (energy)");
+            expect(wd == 0, "a 3 px ribbon passes through unchanged (k = 1: the copy = the game's PS)");
+        }
+        // (e) phase 109d POLE MODE: a pole of three adjacent faces 0.4 px wide each (1.2 px together, under the 1.5 px band), three
+        //     draws into the same targets per frame, 64 frames. Pole mode (box k = h / W per face, disjoint per-face keep windows):
+        //     the average kept rows per column = the pole's width (1.2). The wire mode (tents, one shared noise) keeps less (the faces'
+        //     windows overlap). Pole mode with only ONE face: its own width (0.4).
+        auto poleInk = [&](bool pole, int faces) {
+            std::vector<double> avg(128, 0.0);
+            for (int fr = 0; fr < 64; ++fr) {
+                std::vector<uint32_t> o;
+                for (int fc = 0; fc < faces; ++fc)
+                    draw(vAK.Get() ? vA.Get() : nullptr, gsA.Get(), cpH.Get(), cbw.Get(), 0.2f, (float)fr, swv.Get(), &o, 0.0f,
+                         31.3f + 0.4f * (float)fc, fc == 0, pole);
+                for (int x = 10; x < 118; ++x)
+                    for (int y = 0; y < 64; ++y) { float f; memcpy(&f, &o[((size_t)y * 128 + x) * 4], 4); if (f != -7.0f) avg[x] += 1.0 / 64.0; }
+            }
+            double sum = 0;
+            for (int x = 10; x < 118; ++x) sum += avg[x];
+            return sum / 108.0;
+        };
+        if (getenv("HPOLEDBG")) {                         // (debug: one face, the kept count per row of column 64 over 64 frames)
+            int rows[64] = {};
+            for (int fr = 0; fr < 64; ++fr) {
+                std::vector<uint32_t> o;
+                draw(vA.Get(), gsA.Get(), cpH.Get(), cbw.Get(), 0.2f, (float)fr, swv.Get(), &o, 0.0f, 31.3f, true, true);
+                for (int y = 0; y < 64; ++y) { float f; memcpy(&f, &o[((size_t)y * 128 + 64) * 4], 4); rows[y] += f != -7.0f; }
+            }
+            for (int y = 26; y < 38; ++y) printf("     row %d: %d / 64\n", y, rows[y]);
+        }
+        const double p3 = poleInk(true, 3), p1 = poleInk(true, 1), w3 = poleInk(false, 3);
+        printf("   phase 109d pole mode (GSolidA + PSSolidH, W 1.5 px): 3 adjacent 0.4 px faces -> %.3f rows per column (want ~1.2), "
+               "1 face -> %.3f (want ~0.4); the wire mode (shared noise, tents) on the 3 faces -> %.3f\n", p3, p1, w3);
+        expect(p3 > 1.08 && p3 < 1.32, "pole mode: three faces keep their summed width (disjoint per-face windows)");
+        expect(p1 > 0.34 && p1 < 0.46, "pole mode: one face keeps its own width (box k = h / W)");
+        expect(w3 < p3 - 0.1, "the wire-mode dither keeps less on the same pole (its faces' windows overlap)");
+        // (f) phase 113 -- "the poles disappeared" after pole_aa went on (user, 2026-11-15): can the band make a post VANISH? A 3.5 cm
+        //     delineator post is 1.0 px wide at 55 m, 0.55 px at 100 m, 0.37 px at 150 m (flat 2880 px wide). Two faces of w / 2 each,
+        //     the game's 8 jitter phases (the y shifts of info.txt) on both paths, 64 frames. Per column: the ink (kept rows, mean over
+        //     the frames) must be the post's width (pole mode keeps the energy), the share of frames the column shows the post at all,
+        //     and the longest run of frames with NOTHING in that column (a run DLAA would read as the post vanishing). The game's own
+        //     raster of the same post (no GS) is the reference: pole mode must not show it less often or with longer gaps.
+        {
+            const float jy[8] = { -0.1667f, 0.1667f, -0.3889f, -0.0556f, 0.2778f, -0.2778f, 0.0556f, 0.3889f };
+            struct Vis { double ink = 0, shown = 0; int maxGap = 0, p95Gap = 0; };
+            auto post = [&](bool pole, bool gs, float w) {
+                Vis r;
+                std::vector<int> gap(128, 0), worst(128, 0);
+                double ink = 0, shown = 0;
+                for (int fr = 0; fr < 64; ++fr) {
+                    std::vector<uint32_t> o;
+                    jitY = jy[fr & 7];                    // (the harness moves the geometry by the jitter; the game moves the viewport)
+                    for (int fc = 0; fc < 2; ++fc)
+                        draw(gs ? vA.Get() : vAK.Get(), gs ? gsA.Get() : nullptr, cpH.Get(), cbw.Get(), 0.25f * w, (float)fr, swv.Get(),
+                             &o, 0.0f, 31.3f + jy[fr & 7] + 0.5f * w * (float)fc, fc == 0, pole);
+                    if (getenv("HPOLEDBG") && pole && w < 0.4f && bandW < 1.2f) {
+                        printf("     f%2d:", fr);
+                        for (int x = 10; x < 30; ++x) {
+                            int rows = 0;
+                            for (int y = 26; y < 38; ++y) { float f; memcpy(&f, &o[((size_t)y * 128 + x) * 4], 4); if (f != -7.0f) rows |= 1 << (y - 26); }
+                            printf(" %03x", rows);
+                        }
+                        printf("\n");
+                    }
+                    for (int x = 10; x < 118; ++x) {
+                        int k = 0;
+                        for (int y = 0; y < 64; ++y) { float f; memcpy(&f, &o[((size_t)y * 128 + x) * 4], 4); k += f != -7.0f; }
+                        ink += k; shown += k > 0;
+                        gap[x] = k ? 0 : gap[x] + 1;
+                        worst[x] = (std::max)(worst[x], gap[x]);
+                    }
+                }
+                r.ink = ink / (64.0 * 108.0); r.shown = shown / (64.0 * 108.0);
+                for (int x = 10; x < 118; ++x) r.maxGap = (std::max)(r.maxGap, worst[x]);
+                std::vector<int> wg(worst.begin() + 10, worst.begin() + 118);
+                std::sort(wg.begin(), wg.end());
+                r.p95Gap = wg[(size_t)(0.95 * (double)(wg.size() - 1))];
+                if (getenv("HPOLEDBG")) { printf("     gaps:"); for (int x = 10; x < 40; ++x) printf(" %d", worst[x]); printf("\n"); }
+                return r;
+            };
+            const float ws[3] = { 1.0f, 0.55f, 0.37f };
+            const char* const at[3] = { "55 m", "100 m", "150 m" };
+            const float bands[2] = { 1.0f, 1.5f };
+            for (float bw : bands) {
+                bandW = bw;
+                for (int i = 0; i < 3; ++i) {
+                    const Vis pm = post(true, true, ws[i]), gm = post(false, false, ws[i]);
+                    printf("   phase 113 post %.2f px (%s), band %.1f px: pole mode ink %.3f rows / column (want %.2f), shown in %.0f %% of "
+                           "frames, longest gap %d frames (95 %% of columns <= %d) | the game's raster: ink %.3f, shown %.0f %%, longest gap %d "
+                           "(95 %% <= %d)\n", ws[i], at[i], bw, pm.ink, ws[i], 100.0 * pm.shown, pm.maxGap, pm.p95Gap, gm.ink,
+                           100.0 * gm.shown, gm.maxGap, gm.p95Gap);
+                    expect(std::fabs(pm.ink - ws[i]) < 0.15 * ws[i] + 0.02, "pole mode: a post keeps its width in ink at 55 / 100 / 150 m");
+                    if (bw <= 1.0f) {                     // the default band (pole_min_px 1.0 since phase 113)
+                        expect(pm.shown >= 0.9 * gm.shown - 0.02, "pole mode (band 1 px): a post is shown at least as often as the game's raster");
+                        expect(pm.p95Gap <= gm.maxGap, "pole mode (band 1 px): 95 % of the columns' longest empty runs within the raster's");
+                        expect(pm.maxGap <= gm.maxGap + 3, "pole mode (band 1 px): the longest empty run at most 3 frames over the raster's");
+                    }
+                }
+            }
+            bandW = 1.5f;
+            jitY = 0.0f;
+            // a post wider than the band (2 px faces, 4 px together) passes through: pole mode = the game's PS on every target
+            std::vector<uint32_t> a, b;
+            draw(vAK.Get(), nullptr, cpH.Get(), cbuf.Get(), 1.0f, 5, s6v.Get(), &a, 0.0f, 31.3f, true, false);
+            draw(vA.Get(), gsA.Get(), cpH.Get(), cbuf.Get(), 1.0f, 5, s6v.Get(), &b, 0.0f, 31.3f, true, true);
+            size_t dw = 0;
+            for (size_t k = 0; k < a.size(); ++k) dw += a[k] != b[k];
+            printf("   phase 113: a 2 px post face through the pole-mode GS: %zu words differ from the game's PS\n", dw);
+            expect(dw == 0, "pole mode never drops a wide post's own pixels (pass-through, bit-exact)");
+        }
+    }
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S107"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
 // phase 64: the MOTION side of the widening. A forward-record draw stamped with a widening kind (SetNextGs) replays through the
 // widening GS (DrawIdRecord::SetReplayGs) in the forward-depth batch -- so a 0.06 px wire's forward depth covers the same band as its
 // widened colour (every column, 1 .. 2 rows) instead of the dashes; an unstamped draw replays exactly as before (dashes).
+// phase 109b: + a game-widened power line (kGsNoA2c: no GS, only no alpha-to-coverage in the depth batch).
 static ComPtr<ID3D11GeometryShader> g_s64Gs;
 static ComPtr<ID3D11Buffer> g_s64Cb;
 static int g_s64Binds = 0;
 static bool g_s64Fail = false;                    // the bind callback fails (BindReplay before its shaders are ready)
+static uint8_t g_s64Stamp = 1;                    // phase 109r: the stamp the run lambda records (1 = a widened wire)
+static int g_s64LastKind = 0;                     // phase 109r: the last non-zero kind the replay asked the callback for
 static bool S64ReplayGs(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale) {
     if (kind == 0) { ctx->GSSetShader(nullptr, nullptr, 0); return true; }
+    g_s64LastKind = kind;
     if (g_s64Fail) return false;
     const float v[4] = { 0.5f * vpW, 0.5f * vpH, 1.5f * scale, 1.0f };
     ctx->UpdateSubresource(g_s64Cb.Get(), 0, nullptr, v, 0, 0);
@@ -5357,7 +5954,7 @@ int RunReplayGsUnit(Env& E, Totals& tot) {
         DrawIdRecord rec;
         rec.SetForward(true);
         rec.SetCapturePs(true);
-        if (stamp) rec.SetNextGs(1);
+        if (stamp) rec.SetNextGs(g_s64Stamp);
         rec.Record(c1, 6, 1, 0, 0, 0, false);
         if (second) rec.Record(c1, 6, 1, 6, 0, 0, false);   // (no SetNextGs: unstamped)
         DrawIdRecord::SetReplayGs(&S64ReplayGs, bsNo.Get());
@@ -5406,6 +6003,89 @@ int RunReplayGsUnit(Env& E, Totals& tot) {
                w2, sec, (int)left, w3, sec3, (int)left3);
         expect(w2 == 108 && sec < 54 && !left, "stamped then unstamped: the widened band, then the plain draw's dashes; no GS left");
         expect(w3 < 54 && sec3 < 54 && !left3, "a failed bind: both draws plain (dashes), no GS left bound");
+        // phase 109r: a pole_aa record (solid replay kind | kGsPole) reaches the replay callback with its pole bit (WireWiden::
+        // BindReplay then binds the GS in pole mode with pole_min_px, not wire_min_px) and still widens
+        g_s64Stamp = (uint8_t)(4 | DrawIdRecord::kGsPole);
+        g_s64LastKind = 0;
+        int r4 = 0;
+        const int w4 = run(true, &r4);
+        g_s64Stamp = 1;
+        printf("   phase 109r pole stamp 0x%02x: the replay asked for kind 0x%02x, %d / 108 columns\n", 4 | DrawIdRecord::kGsPole,
+               g_s64LastKind, w4);
+        expect(g_s64LastKind == (4 | DrawIdRecord::kGsPole) && w4 == 108,
+               "109r: a pole_aa record keeps its kGsPole bit through the record to the replay GS callback");
+        expect(WireWiden::kReplayPole == DrawIdRecord::kGsPole, "109r: WireWiden::kReplayPole == DrawIdRecord::kGsPole");
+    }
+    // phase 109b: a GAME-widened power line (PS 69dcaf36: the game draws it ~1.1 px wide with alpha = radius / width, here 0.3) in
+    // the forward-depth batch. Unstamped: alpha-to-coverage drops every pixel (alpha < 0.5 -> no coverage at 1x) -> no depth, no MV.
+    // Stamped DrawIdRecord::kGsNoA2c: no GS of ours (no bind), A2C off -> its depth on every column, as thick as the game drew it.
+    if (ok) {
+        static const char kSrcW[] =
+            "struct V { float4 col : COLOR0; float4 pos : SV_Position; };\n"
+            "V vs(uint i : SV_VertexID) {\n"
+            "  const float2 P[6] = { float2(8, -1), float2(8, 1), float2(120, -1), float2(8, 1), float2(120, 1), float2(120, -1) };\n"
+            "  float2 q = P[i % 6]; float y = (i < 6 ? 31.3 : 15.3) + q.y * 0.55 + (q.x - 8.0) / 112.0 * 1.3;\n"
+            "  V o; o.col = float4(0.5, 0.5, 0.5, 0.3); o.pos = float4(q.x / 64.0 - 1.0, 1.0 - y / 32.0, 0.5, 1.0); return o; }\n"
+            "float4 ps(V v) : SV_Target { return float4(0, 0, 0, v.col.w); }\n";
+        ComPtr<ID3DBlob> vbw, pbw;
+        ComPtr<ID3D11VertexShader> vsw; ComPtr<ID3D11PixelShader> psw;
+        bool okw = SUCCEEDED(D3DCompile(kSrcW, sizeof(kSrcW) - 1, "s109b", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vbw, &err)) &&
+                   SUCCEEDED(D3DCompile(kSrcW, sizeof(kSrcW) - 1, "s109b", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &pbw, &err)) &&
+                   SUCCEEDED(d->CreateVertexShader(vbw->GetBufferPointer(), vbw->GetBufferSize(), nullptr, &vsw)) &&
+                   SUCCEEDED(d->CreatePixelShader(pbw->GetBufferPointer(), pbw->GetBufferSize(), nullptr, &psw));
+        expect(okw, "S64 / 109b: power-line shaders");
+        // stamp: 0 = unstamped, else the kind; second = + a later unstamped draw (rows ~15): the blend state must go back to A2C
+        auto runW = [&](uint8_t stamp, int* rowsMax, bool second, int* secondCols, bool* gsLeft) -> int {
+            c->ClearState();
+            c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
+            c->IASetIndexBuffer(ib.Get(), DXGI_FORMAT_R16_UINT, 0);
+            c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            c->VSSetShader(vsw.Get(), nullptr, 0);
+            c->PSSetShader(psw.Get(), nullptr, 0);
+            c->RSSetState(rsNone.Get());
+            const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0.01f, 0.9f };
+            c->RSSetViewports(1, &vp);
+            DrawIdRecord rec;
+            rec.SetForward(true);
+            rec.SetCapturePs(true);
+            if (stamp) rec.SetNextGs(stamp);
+            rec.Record(c1, 6, 1, 0, 0, 0, false);
+            if (second) rec.Record(c1, 6, 1, 6, 0, 0, false);
+            DrawIdRecord::SetReplayGs(&S64ReplayGs, bsNo.Get());
+            const auto rr = rec.ReplayDepth(c1, drtv.Get(), dsv.Get(), dss.Get(), bsA2c.Get(), true);
+            ID3D11GeometryShader* g = nullptr; c->GSGetShader(&g, nullptr, nullptr); *gsLeft = g != nullptr; if (g) g->Release();
+            DrawIdRecord::SetReplayGs(nullptr, nullptr);
+            rec.Shutdown();
+            c->CopyResource(st.Get(), dt.Get());
+            D3D11_MAPPED_SUBRESOURCE m{};
+            int cols = 0; *rowsMax = 0; *secondCols = 0;
+            if (rr.replayed == (second ? 2 : 1) && SUCCEEDED(c->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                for (int x = 10; x < 118; ++x) {
+                    int rows = 0, rows2 = 0;
+                    for (int y = 0; y < 64; ++y)
+                        if (((const float*)((const char*)m.pData + y * m.RowPitch))[x] > 0.0f) { if (y >= 24) ++rows; else ++rows2; }
+                    if (rows) ++cols;
+                    if (rows2) ++*secondCols;
+                    *rowsMax = std::max(*rowsMax, rows);
+                }
+                c->Unmap(st.Get(), 0);
+            }
+            c->ClearState();
+            return cols;
+        };
+        if (okw) {
+            int rA = 0, rN = 0, r2 = 0, s0 = 0, sN = 0, s2 = 0; bool l0 = true, lN = true, l2 = true;
+            g_s64Binds = 0;
+            const int a2c = runW(0, &rA, false, &s0, &l0);
+            const int noA = runW(DrawIdRecord::kGsNoA2c, &rN, false, &sN, &lN);
+            const int both = runW(DrawIdRecord::kGsNoA2c, &r2, true, &s2, &l2);
+            printf("   phase 109b game-widened power line (1.1 px, alpha 0.3): unstamped (A2C) %d / 108 columns; stamped kGsNoA2c %d / 108 "
+                   "columns, <= %d rows, GS binds %d, GS left %d; [stamped, unstamped]: %d + %d columns\n", a2c, noA, rN, g_s64Binds,
+                   (int)lN, both, s2);
+            expect(a2c < 54, "109b: with A2C an alpha-0.3 power line gets dashes of forward depth (the bug; WARP dithers A2C at 1x)");
+            expect(noA == 108 && rN <= 3 && g_s64Binds == 0 && !lN, "109b: stamped kGsNoA2c -> depth on every column, as thin as drawn, no GS");
+            expect(both == 108 && s2 == a2c && !l2, "109b: the next unstamped draw is back on A2C (the same dashes as alone)");
+        }
     }
     g_s64Gs.Reset(); g_s64Cb.Reset();
     if (g_debugLayer) { const int dl = DrainDebugLayer("S64"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
@@ -5450,6 +6130,125 @@ static std::vector<char> DxbcChunk(const std::vector<char>& b, const char* tag) 
     }
     return out;
 }
+// phase 114: a VS joins a solid VS set by its OUTPUT SIGNATURE (WireWiden::OsgnSet / NoteVs). (a) the embedded reference payloads ARE
+// the OSGN chunks of the four first VSs (byte for byte, from the game bytecode); (b) every VS added to a set by hand in phases 66 /
+// 107b / 109e / 111 / 113 is found by the rule alone (the evidence each of them was added on); (c) VSs of other shader families do
+// not match; (d) NoteVs: a VS outside every checksum list joins (returns the set) and IsSolidVs then says yes for that set's kinds,
+// a VS already in a set by checksum returns 0, malformed blobs return 0; (e) the corpus (every VS blob under captures\) per set.
+int RunOsgn114Unit(Env& E, Totals& tot) {
+    (void)E;
+    printf("\n===== S114 unit: a VS joins a solid VS set by its output signature (byte-identical OSGN) =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    struct Ref { const char* file; int set; };
+    const Ref refs[] = { { "vs_07dfaa00.dxbc", 'A' }, { "vs_6c157c5f.dxbc", 'B' }, { "vs_3847be86.dxbc", 'D' }, { "vs_e5a4956d.dxbc", 'F' },
+                         // the hand-added members (66 a484ef85; 107b 9d2904cd / d87f5280; 109e ccd6b6d1; 111 2a9f326e / 7fcd07d6; 113 bdce664b)
+                         { "vs_a484ef85.dxbc", 'B' }, { "vs_9d2904cd.dxbc", 'D' }, { "vs_d87f5280.dxbc", 'D' }, { "vs_ccd6b6d1.dxbc", 'A' },
+                         { "vs_2a9f326e.dxbc", 'A' }, { "vs_7fcd07d6.dxbc", 'A' }, { "vs_bdce664b.dxbc", 'A' },
+                         // other families: the forward re-light, the vertex-colour mesh, far cars, the game-widened power line, terrain
+                         { "phase109_2026-11-14\\vs_4186dac5.dxbc", 0 }, { "phase109_2026-11-14\\vs_115d4014.dxbc", 0 },
+                         { "phase109_2026-11-14\\vs_1ec77518.dxbc", 0 }, { "phase109_2026-11-14\\vs_277d2302.dxbc", 0 },
+                         { "phase109_2026-11-14\\vs_3c957c7c.dxbc", 0 }, { "phase109_2026-11-14\\vs_9d73eba3.dxbc", 0 } };
+    int found = 0;
+    for (const Ref& r : refs) {
+        std::vector<char> v;
+        if (!LoadFile(r.file, v)) { printf("   (captures\\%s not found: skipped)\n", r.file); continue; }
+        ++found;
+        const int s = WireWiden::OsgnSet(v.data(), v.size());
+        char b[200];
+        snprintf(b, sizeof(b), "%s: OSGN set %c, want %c", r.file, s ? (char)s : '-', r.set ? (char)r.set : '-');
+        printf("   %s\n", b);
+        expect(s == r.set, b);
+    }
+    expect(found >= 11 || found == 0, "the reference + member VS blobs are present (or all absent: CI)");
+    // (d) NoteVs joins, with fake object pointers; 5e03b1ca (the 10:48 census) = pair A's signature, not on any checksum list
+    {
+        std::vector<char> v;
+        if (LoadFile("census_2026-11-15\\shimmer_20261115_104831\\census\\5e03b1ca_41c3064e\\vs.dxbc", v)) {
+            static int objJoin = 0, objRef = 0;
+            const int j = WireWiden::NoteVs(&objJoin, v.data(), v.size());
+            printf("   NoteVs(5e03b1ca) -> set %c; IsSolidVs kind A %d, kind G %d, kind B %d\n", j ? (char)j : '-',
+                   (int)WireWiden::IsSolidVs(&objJoin, WireWiden::kSolidA), (int)WireWiden::IsSolidVs(&objJoin, WireWiden::kSolidG),
+                   (int)WireWiden::IsSolidVs(&objJoin, WireWiden::kSolidB));
+            expect(j == 'A', "a VS on no checksum list with pair A's OSGN joins set A");
+            expect(WireWiden::IsSolidVs(&objJoin, WireWiden::kSolidA) && WireWiden::IsSolidVs(&objJoin, WireWiden::kSolidG) &&
+                   !WireWiden::IsSolidVs(&objJoin, WireWiden::kSolidB), "... and counts for pair A's kinds only");
+            std::vector<char> r;
+            if (LoadFile("vs_07dfaa00.dxbc", r))
+                expect(WireWiden::NoteVs(&objRef, r.data(), r.size()) == 0 && WireWiden::IsSolidVs(&objRef, WireWiden::kSolidA),
+                       "a VS already in the set by checksum: no join reported, still in the set");
+            char junk[64] = "DXBC";
+            expect(WireWiden::NoteVs(&objJoin, junk, sizeof(junk)) == 0 && !WireWiden::IsSolidVs(&objJoin, WireWiden::kSolidA),
+                   "re-created at the same address with other bytecode: forgotten, no join");
+            // phase 115r (audit B4): a join FLOOD (300 VS objects with pair A's OSGN) goes into the join set (256 slots; the rest is
+            // counted) and never into the 64-slot hand-listed set: a hand-listed VS created after the flood is still found (before
+            // 115r the 65th member was silently dropped); a joined VS says so (IsSolidVs *joined), a hand-listed one does not
+            {
+                static int flood[300];
+                const int full0 = WireWiden::JoinFull();
+                int joins = 0;
+                for (int& o : flood) joins += WireWiden::NoteVs(&o, v.data(), v.size()) == 'A';
+                static int objHand = 0;
+                char hb[64] = "DXBC";
+                memcpy(hb + 4, WireWiden::kSolidVsA5, 16);    // (the checksum is all ChecksumIs compares: a hand-listed VS of set A)
+                const int hj = WireWiden::NoteVs(&objHand, hb, sizeof(hb));
+                bool jh = true, jf = false;
+                const bool hand = WireWiden::IsSolidVs(&objHand, WireWiden::kSolidA, &jh);
+                const bool fl = WireWiden::IsSolidVs(&flood[0], WireWiden::kSolidA, &jf);
+                printf("   phase 115r join flood: %d of 300 joined (join set full %d more times); hand-listed after the flood: in set %d "
+                       "(joined %d); flood[0] joined %d\n", joins, WireWiden::JoinFull() - full0, (int)hand, (int)jh, (int)jf);
+                expect(joins == 256 && WireWiden::JoinFull() - full0 == 44, "a 300-VS join flood: 256 held, 44 counted as lost");
+                expect(hj == 0 && hand && !jh, "a hand-listed VS created after the flood is still in its set (not marked joined)");
+                expect(fl && jf, "a flood VS is marked joined (the callers trust it for non-instanced static draws only)");
+                for (int& o : flood) WireWiden::NoteVs(&o, junk, sizeof(junk));   // (forgotten again: later sections start clean)
+                WireWiden::NoteVs(&objHand, junk, sizeof(junk));
+                expect(!WireWiden::IsSolidVs(&flood[0], WireWiden::kSolidA) && !WireWiden::IsSolidVs(&objHand, WireWiden::kSolidA),
+                       "the flood + the hand-listed VS forgotten (re-created with other bytecode)");
+            }
+        } else printf("   (5e03b1ca not found: NoteVs join check skipped)\n");
+        uint32_t sz = 1;
+        expect(WireWiden::DxbcChunk(nullptr, 0, "OSGN", &sz) == nullptr && sz == 0, "DxbcChunk: no blob");
+        char bad[40] = "DXBC";
+        uint32_t n = 1000;
+        memcpy(bad + 28, &n, 4);
+        expect(WireWiden::DxbcChunk(bad, sizeof(bad), "OSGN", &sz) == nullptr && WireWiden::OsgnSet(bad, sizeof(bad)) == 0,
+               "DxbcChunk: a chunk count past the blob is refused");
+    }
+    // (e) the corpus: every VS blob under captures\ (de-duplicated by checksum) grouped by the rule
+    {
+        WIN32_FIND_DATAA fd;
+        int perSet[4] = {}, total = 0;
+        std::vector<uint32_t> seen;
+        std::string joins;
+        for (const char* sub : { "", "phase109_2026-11-14\\", "census_2026-11-14\\" })
+        for (const char* base : { "captures\\", "..\\..\\..\\captures\\" }) {
+            const std::string pat = std::string(base) + sub + "vs_*.dxbc";
+            HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+            if (h == INVALID_HANDLE_VALUE) continue;
+            do {
+                std::vector<char> v;
+                const std::string p = std::string(sub) + fd.cFileName;   // LoadFile adds the captures folder
+                if (!LoadFile(p.c_str(), v) || v.size() < 8) continue;
+                uint32_t c0;
+                memcpy(&c0, v.data() + 4, 4);
+                if (std::find(seen.begin(), seen.end(), c0) != seen.end()) continue;
+                seen.push_back(c0);
+                ++total;
+                const int s = WireWiden::OsgnSet(v.data(), v.size());
+                const int i = s == 'A' ? 0 : s == 'B' ? 1 : s == 'D' ? 2 : s == 'F' ? 3 : -1;
+                if (i >= 0) { ++perSet[i]; char b[24]; snprintf(b, sizeof(b), " %08x->%c", c0, (char)s); joins += b; }
+            } while (FindNextFileA(h, &fd));
+            FindClose(h);
+            break;                                       // (one base folder per sub-folder)
+        }
+        printf("   corpus: %d distinct VSs; set A %d, B %d, D %d, F %d:%s\n", total, perSet[0], perSet[1], perSet[2], perSet[3], joins.c_str());
+        if (total) expect(perSet[0] >= 5 && perSet[1] >= 2 && perSet[2] >= 3 && perSet[3] >= 1 && perSet[0] + perSet[1] + perSet[2] + perSet[3] < total,
+                          "the corpus: every set has its members, most VSs match none");
+    }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
 int RunStreetLightUnit(Env& E, Totals& tot) {
     printf("\n===== S66 unit: street lights -- the instanced VS a484ef85 through GSolidB (pair B), lens rule, instanced replay =====\n");
     int checks = 0, fails = 0;
@@ -5488,7 +6287,7 @@ int RunStreetLightUnit(Env& E, Totals& tot) {
     // harness PSs: one with the VS's own signature (no GS), one with the GS's (+ TEXCOORD7); both write the coverage marker
     static const char kPs[] =
         "struct VB { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; };\n"
-        "struct VBK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; float4 kf : TEXCOORD7; };\n"
+        "struct VBK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; float4 kf : TEXCOORD7; noperspective float2 dl : TEXCOORD8; };\n"
         "struct O { float4 o0 : SV_Target0; float4 o1 : SV_Target1; float4 o2 : SV_Target2; uint4 o3 : SV_Target3; };\n"
         "O psPlain(VB v) { O o; o.o0 = v.col; o.o1 = float4(v.t0, 1); o.o2 = float4(v.t2.xyz, 0.5); o.o3 = uint4(1, 2, 3, 4); return o; }\n"
         "O psK(VBK v) { O o; o.o0 = v.col; o.o1 = float4(v.t0, 1); o.o2 = float4(v.t2.xyz, 0.5); o.o3 = uint4(1, 2, 3, 4); return o; }\n"
@@ -6264,6 +7063,24 @@ int RunRoadsideScene(Env& E, float snapPx, Totals& tot, int mut, int eye) {
     printf("   origin-free (camera-relative) paired draws held static: %.2f per readback (want 16 = the non-instanced clumps; the "
            "mutation: 0)\n", rbN ? (double)oFree / (double)rbN : 0.0);
     if (!(mut & 4) && oFree != 16 * rbN) { ++fails; printf("   FAIL origin-free count\n"); }
+    // phase 106: the camera-relative clumps are grass-sized (3360 indices): never left for the parent vote (Cnt [245] = 0)
+    {
+        const uint64_t oSmall = ds.originSmall - st0.originSmall;
+        printf("   phase 106: origin-free small draws left for the rigid-parent vote: %llu (want 0: every clump is 3360 indices)\n",
+               (unsigned long long)oSmall);
+        ++checks;
+        if (oSmall != 0) { ++fails; printf("   FAIL phase 106: a grass-sized camera-relative clump was listed for the vote\n"); }
+    }
+    // phase 109r: a LARGE origin-free paired draw (the 16 clumps, 3360 indices) is reset (640..) and must never also set its bit in
+    // the static skip bitmask (384..511): the phase-106 if / else-if chain break did exactly that ("mut109" brings it back)
+    {
+        const uint64_t conf = ds.statConflict - st0.statConflict, feeds = ds.statFeeds - st0.statFeeds;
+        printf("   phase 109r: draws in both the static (384..511) and the reset bitmask: %llu over %llu static-table feeds (want 0%s)\n",
+               (unsigned long long)conf, (unsigned long long)feeds, (mut & 256) ? "; MUTATION mut109: must be > 0" : "");
+        checks += 2;
+        if (feeds == 0) { ++fails; printf("   FAIL phase 109r: the static table was never fed (the check would be vacuous)\n"); }
+        if (conf != 0) { ++fails; printf("   FAIL phase 109r: a large origin-free draw set its bit in the static skip bitmask\n"); }
+    }
     // round 7 diagnostics (the 'MV draw-ids' log fields): the max |x| |y| |w| of the origin-free draws (frames 0..99: the
     // clumps' column 3 = P * (eye offset, 1) + the residues -- exact), the depth-only / lateral split (here: roadside posts and
     // the overtaking car crossing the eye plane, |w| < 0.20 m with |x| or |y| far over 0.50 -- informational, the nearest miss
@@ -7656,8 +8473,10 @@ int main(int argc, char** argv) {
         else if (!strcmp(s, "mutinst")) g_s15Mut = 8;                //   S15 with multi-instance draws listed again (round-4 rule)
         else if (!strcmp(s, "mutsolid")) g_solidMut = true;          // phase 80: S15 with the solid dither gate off (must FAIL)
         else if (!strcmp(s, "mutr6")) g_s15Mut = 16;                 // round 7: S15 with the round-6 origin-free rule (VR eyes FAIL)
+        else if (!strcmp(s, "mut109")) g_s15Mut = 256;               // phase 109r: S15 with the phase-106 oFree chain bug (must FAIL)
         else if (!strcmp(s, "mutshape")) g_s17Mut = 32;              // v0.10.0 phase 19: S17 with the MVP-shape rule off
         else if (!strcmp(s, "mutlayout")) g_layMut = 64;             // v0.10.0 phase 22: S17 / S18 with rows 4..7 (must FAIL both)
+        else if (!strcmp(s, "mut106")) g_mut106 = 128;               // phase 106: S21 with the phase-106 rule off (must FAIL)
         else if (!strncmp(s, "cabsmall=", 9)) DrawIdMv::SetCabinSmall((unsigned)atoi(s + 9));   // phase 19: mv_cabin_small
         else if (!strncmp(s, "inst=", 5)) DrawIdMv::SetInstReplay(atoi(s + 5));
         else if (!strncmp(s, "cmpdump=", 8)) { if (fopen_s(&g_cmpOut, s + 8, "wb")) g_cmpOut = nullptr; }
@@ -7782,7 +8601,10 @@ int main(int argc, char** argv) {
     // v0.10.0 phase 14 round 6 (S15): 16 camera-relative grass clumps -- clump meshes whose vertices carry bone k (VSSkin adds
     // Bones[k] = the clump's position relative to THIS frame's camera, as the game's per-frame offset)
     for (int k = 0; k < 16; ++k) {
-        E.meshes[MClumpCR0 + k] = g.Clump(0.45f + 0.01f * (float)k, 0.35f);
+        // phase 106: padded to 3360 indices = the SMALLEST camera-relative grass batch of the game (3360..19830 in the VR captures
+        // of 2026-11-14): a camera-relative draw of more than kOFreeSmallIc (512) indices stays static by the round-6 rule, it is
+        // never listed for the rigid-parent vote (only a plate-sized one is: S21)
+        E.meshes[MClumpCR0 + k] = g.PadTo(g.Clump(0.45f + 0.01f * (float)k, 0.35f), 3360u);
         for (int q = 0; q < 8; ++q) g.v[(size_t)E.meshes[MClumpCR0 + k].bv + (size_t)q].bone = (float)k;
     }
     // v0.10.0 phase 19 (S17 car): the own car's hood (world layer), the interior's big draws (36 indices per box), small real
@@ -8013,6 +8835,16 @@ int main(int argc, char** argv) {
         res.push_back({ "S11/S12 unit: scissor-enabled RS copy (a no-scissor state gets ScissorEnable, everything else equal), "
                         "clip / 1/2-size scissor + viewport maths", fl });
     }
+    if ((only < 0 || only == 107) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 107b
+        const int fl = RunSolid107Unit(E, tot);
+        res.push_back({ "S107 unit: ETS2 solid pairs C / D / E (crane / railing / street light PS copies = the game's bit for bit at k = 1, "
+                        "discard kept; GSolidD fits the game VSs; kind -> replay GS 2..4; 0.06 px ribbons dithered, 3 px unchanged)", fl });
+    }
+    if ((only < 0 || only == 114) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 114
+        const int fl = RunOsgn114Unit(E, tot);
+        res.push_back({ "S114 unit: a VS joins a solid VS set by its byte-identical output signature (the references = the game's "
+                        "OSGN chunks; every hand-added member found by the rule; other families not; NoteVs join / forget)", fl });
+    }
     if ((only < 0 || only == 66) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 66
         const int fl = RunStreetLightUnit(E, tot);
         res.push_back({ "S66 unit: street lights (instanced VS a484ef85 = pair B's signature; GSolidB widens far thin faces of both "
@@ -8122,6 +8954,20 @@ int main(int argc, char** argv) {
     if ((only < 0 || only == 20) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {
         const int fl = RunMirrorScene(E, snapPx, tot, true);
         res.push_back({ "S20 = S5 with the mirror unit in turns (mirror_turns: every 2nd frame + forced runs; MVs vs its last run)", fl });
+    }
+    // phase 106: S21 = S8 with REPEATING loose keys (every frame / 3 of every 4 frames): the view-space plates pair by their loose
+    // key and are origin-free -- they must still take the trailer's / van's motion (listed for the vote); the parked plate and the
+    // sign next to the passing truck (small origin-free STATIC draws) stay static. After S20, so an older binary's full-run cmpdump
+    // still lines up for S1-S20. "mut106" (the rule off) must FAIL both runs.
+    if ((only < 0 || only == 21) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {
+        for (int rep = 1; rep <= 2; ++rep) {
+            g_s8KeyRep = rep;
+            const int fl = RunParentScene(E, snapPx, tot, 0);
+            g_s8KeyRep = 0;
+            res.push_back({ rep == 1 ? "S21 (phase 106) = S8 with loose keys repeating EVERY frame: paired origin-free view-space plates still "
+                                       "take their body's motion, static ones stay static"
+                                     : "S21 (phase 106) = S8 with loose keys repeating within runs of 4 frames (paired <-> unpaired)", fl });
+        }
     }
     // phase 35: S19 state shadow (didshadow=1 only; last in the full run); the verify mode's mismatches of S1-S18 are failures
     if (g_didShadow) {

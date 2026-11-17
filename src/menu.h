@@ -18,10 +18,11 @@
 
 #include <d3d11.h>
 #include <cstdint>
+#include <vector>                                    // phase 115: RenderBugPng
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 96;                      // (phase 89d: 88 -> 96, + the Bug report group; phase 83: 72 -> 88, + the 10 In-game UI (VR) rows; phase 82: 68 -> 72, + the 2 Game TAA rows; phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 112;                     // (phase 112: 96 -> 112, + Picture fixes and its 7 new fix rows; phase 89d: 88 -> 96, + the Bug report group; phase 83: 72 -> 88, + the 10 In-game UI (VR) rows; phase 82: 68 -> 72, + the 2 Game TAA rows; phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
@@ -48,7 +49,13 @@ constexpr int   kGraphCols    = 43;                  // 2 reference px each (86 
 constexpr float kWidgetGraphH = 20.0f;
 constexpr float kWidgetText2H = 42.0f;               // the two lines in y 4..24 / 24..40
 constexpr float kWidgetText1H = 24.0f;               // the one line (big font) in y 2..22
-constexpr float kWidgetRefHMax = kWidgetRefH + kWidgetGraphH;
+// phase 115: the census BUG ICON (src/census_run.h CensusBugNow) -- a drawn bug + "N to capture" / "N captured" on a dark plate.
+// Flat: its own box (kBugRefW x kBugRefH, DrawBug) in a free top corner. VR: a strip of kWidgetBugH under the fps box INSIDE the box's
+// texture (SetWidgetBug), so it takes every placement the fps box has (drawn into the eyes with its stereo shift, turned, fixed in the
+// cab, attached to the vehicle, the OpenXR quad layer) -- the same layer and depth, the same picture in both eyes.
+constexpr float kWidgetBugH = 30.0f;
+constexpr float kBugRefW = 128.0f, kBugRefH = 34.0f;
+constexpr float kWidgetRefHMax = kWidgetRefH + kWidgetGraphH + kWidgetBugH;   // (phase 115: + the bug strip)
 
 struct Row {                                         // (phase 74: name 48 -> 64, value / keys 72 -> 96: longer languages)
     wchar_t name[64];
@@ -118,6 +125,29 @@ constexpr float kStatusRefW = 300.0f;
 constexpr int   kStatusEyes = 0, kStatusFlat = 1, kStatusSlots = 2;
 bool  DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
                  float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2, int slot);
+// phase 112b: the census LEGEND -- a small box (dark, 75 % opaque, the panel's face). Phase 113 (the user: "explain what is happening
+// in plain words for a player"): a title, up to kLegendText plain lines (white) and ONE small colour-key row (a swatch + one word per
+// kind, the word drawn in its colour; n = 0: no row). Its width follows the longest line (GDI-measured at the build scale: nothing is
+// ever cut), its height the line count. Same texture-cache slots as the status box (kStatusEyes / kStatusFlat), rebuilt only when
+// the text, a colour or the build scale changes.
+constexpr int kLegendLines = 6;                      // colour-key entries
+constexpr int kLegendText = 5;                       // plain lines
+struct Legend {                                      // fill with memset 0 / {} first (the cache compares the whole struct)
+    wchar_t  title[96];
+    wchar_t  line[kLegendText][128];                 // the plain lines ("" = none; drawn in order, empty ones skipped)
+    int      n;                                      // colour-key entries used (<= kLegendLines)
+    wchar_t  word[kLegendLines][24];                 // one word per colour ("thin"), drawn in rgb after its swatch
+    uint32_t rgb[kLegendLines];                      // COLORREF (0x00BBGGRR, sRGB bytes)
+};
+// the box in reference px (scale 1) for `lg`, measured with GDI at scale 2 (no device objects; any thread). False = GDI failed.
+bool  LegendRefSize(const Legend& lg, float* w, float* h);
+// Draws `lg` with the point (x, y) px at the box's anchor (ax, ay): (0, 0) = top-left corner, (0.5, 0) = top centre, (0.5, 1) =
+// bottom centre ... `scale` px per reference px, but smaller when the box would be wider than maxW or taller than maxH px (> 0;
+// nothing is ever cut: it shrinks to fit). The box is then kept inside the target. Same arguments otherwise as DrawStatus.
+// *drawnH (optional) = the box's height in target px as drawn.
+bool  DrawLegend(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x, float y, float ax,
+                 float ay, float scale, float buildScale, float maxW, float maxH, int outMode, const Legend& lg, int slot,
+                 float* drawnH = nullptr);
 // phase 44: the fps box as a turned quad (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, the drawn-in VR fallback): `clip` = its 4
 // corners in clip space as DrawCorners (top-left, top-right, bottom-left, bottom-right; w > 0). Texture / states as DrawWidget.
 bool  DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
@@ -146,6 +176,17 @@ struct WidgetGraph {
     float    colMs[kGraphCols] = {};                 // oldest first; 0 = no frame in that slice yet (no bar)
 };
 void  SetWidgetGraph(const WidgetGraph& g);
+// phase 115: the bug icon. DrawBug = its own box (flat; a VR eye picture when the fps box is off): same arguments as DrawStatus.
+// SetWidgetBug = the strip under the fps box ("" / null = none; any thread; a change rebuilds the box once and WidgetRefH grows by
+// kWidgetBugH). RenderBugPng = the pixels alone (menu_shot): inWidget = the fps box strip's size, else the box's.
+// phase 116: line3 = a small third line ("2: fix is off"; null / "" = none) in the SAME box size (the two lines shrink to make room).
+bool  DrawBug(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
+              float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2, int slot,
+              const wchar_t* line3 = nullptr);
+void  SetWidgetBug(const wchar_t* line1, const wchar_t* line2, const wchar_t* line3 = nullptr);
+bool  WidgetBugOn();
+bool  RenderBugPng(const wchar_t* line1, const wchar_t* line2, float scale, bool inWidget, std::vector<uint32_t>& out, uint32_t* w,
+                   uint32_t* h, const wchar_t* line3 = nullptr);
 // the box height in reference px for these lines: kWidgetRefH without the graph; with it the text block (WidgetTextRefH) +
 // kWidgetGraphH. Pass the lines DrawWidget gets (an empty / null line = not shown).
 float WidgetTextRefH(const wchar_t* line1, const wchar_t* line2, bool graphOn);

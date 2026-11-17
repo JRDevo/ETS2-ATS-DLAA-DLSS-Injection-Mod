@@ -205,7 +205,7 @@ cheat sheet.)
 | `Shift+F4` | DLAA model 4 = preset `M` | 4 × 880 Hz |
 | `Shift+F5` | DLAA area −10 % (10..100; 40..100 before v0.10.0 phase 15, 20..100 until phase 24) | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 10 limit |
 | `Shift+F6` | DLAA area +10 % | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 100 limit |
-| `Shift+F7` | Sharpen strength −0.1 (0..1) | 1 beep at `400 + 800·sharpness` Hz; low 200 Hz at a limit |
+| `Shift+F7` | Sharpen strength −0.1 (0..2, phase 104) | 1 beep at `400 + 800·sharpness` Hz; low 200 Hz at a limit |
 | `Shift+F8` | Sharpen strength +0.1 | 1 beep at `400 + 800·sharpness` Hz; low 200 Hz at a limit |
 | `Shift+F9` | Sharpen width (RCAS radius) −0.5 (1..4) | 2 beeps at `400 + 250·radius` Hz; low 200 Hz at a limit |
 | `Shift+F10` | Sharpen width +0.5 | 2 beeps at `400 + 250·radius` Hz; low 200 Hz at a limit |
@@ -258,7 +258,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `gpu_timing` | `-1` | `-1` = GPU timestamp queries around each eye's DLAA work at log level 4 (phase 45; was: VR only), `0` = off, `1` = on (flat too); logs avg ms per eye every 600 frames. v0.6.2: also the whole-frame `GPU spans [...]: scene .. ms/frame \| gbuf .. ms/pass` line every 300 frames, with DLAA ON, OFF or passive |
   | `trace_auto_frame` | `0` | auto-run the frame trace once when the Present count reaches this; `0` = off (`Ctrl+F11` always works) |
   | `dlss_preset` | `default` | DLSS render preset for DLAA (`default`, `J`, `K`, `L`, `M`, `E`, `F`); models 1–4 (`Shift+F1`..`F4`) select `default`/`E`/`F`/`M`; written by `Shift+F12`. v0.7.0: applied to every DLSS quality mode (all hint parameters), so it also picks the model while upscaling |
-  | `sharpness` | `0.4` | RCAS sharpen strength after DLAA, 0..1 (`0` = pass skipped); `Shift+F7`/`F8` adjust; written by `Shift+F12` |
+  | `sharpness` | `0.4` | RCAS sharpen strength after DLAA, 0..2 (phase 104; `0` = pass skipped); `Shift+F7`/`F8` adjust; written by `Shift+F12` |
   | `sharp_radius` | `1.5` | RCAS ring-tap radius in texels, 1..4 (bilinear taps); `Shift+F9`/`F10` adjust (v0.5.8); written by `Shift+F12` |
   | `dlaa_area` | `100` | int 10..100 (v0.6.4; 40..100 before v0.10.0 phase 15, 20..100 until phase 24): DLAA runs on a rect of this % of each eye image's width AND height (pixel count ~ area²), centred on the eye's optical centre; `100` = whole image (v0.6.3 behaviour); `Shift+F5`/`F6` adjust; written by `Shift+F12` |
   | `dlaa_area_feather` | `96` | int 0..512 px (v0.6.4): blend ramp from the raw frame to the DLAA result at the rect edges that lie inside the image; `0` = hard edge (render px; v0.7.0 upscale: scaled per axis to output px) |
@@ -2949,3 +2949,1594 @@ picture is meant to stay the same (item 2 only skips pixels the headset never sh
   the user could not tell it from "normal" blur): the range goes to 200 % (MaxLen 6 % of the width, 48 taps), and a test view
   `motion_blur_show` (the row's last step "200 % + pink (test)") tints blurred pixels pink by smear length (full at 24 px).
 - **Not verified**: the cost, the cab edges, the DLSS upscale path, flat multi-view, the 200 % / pink steps in game.
+
+### Phase 105: Steady own shadow row (105a) and sharpen presets (105b)
+
+- **105a, menu row "Steady own shadow"** (Picture, after Light trail fix; `dlaa.ini shadow_lock`, phase 103's own-vehicle shadow
+  grid lock). Default now **1** (was 0; the user's VR test: clearly better). Left / Right and `key_shadow_lock` (`Ctrl+Shift+F3`)
+  call `SetShadowLock`: `g_slUser` = the choice (Save writes `shadow_lock`, Reset sets 1), `g_slWant` = the switch the render code
+  takes at the next shadow slice set (`SlOnBind`, as phase 103c). The four extra draw hooks are installed in every WITH_DLAA start
+  and `SlNoteCreateVs` classifies every vertex shader (was: only with `shadow_lock` or `shadow_lock_diag` = 1), so a start with
+  both 0 can switch on live: the first switch-on sets `g_slOn` (learning starts; the lock arms after `kSlStableN` clean Presents).
+  Hidden (phase 87) without the draw hooks (`g_slDrawHooksOk`) or while the main scene runs no DLAA. Cost column: CPU of the
+  `kBShadowLock` profiler block. Hotkeys page label "Steady own shadow on / off".
+- **105b, menu row "Sharpen preset"** (after Sharpen type; RCAS only, the Halo row's rules: hidden with NIS / without DLAA, shown
+  at strength 0). `src/sharp_preset.h`: Soft 0.4 / 0 % / colour, Balanced 0.8 / 0 % / colour, Crisp 1.2 / 10 % / brightness only,
+  Extra crisp 1.6 / 20 % / brightness only, Custom = unchanged. A named preset sets `sharpness` + `sharp_halo` + `sharp_luma`
+  (never `sharp_radius` / `sharpen_type`). **Halo limit** and **Sharpen colour** are shown only with Custom. A hand change of one
+  of the three (row or `Shift+F7` / `F8`) makes a named preset Custom (`SharpPresetTouched`). `dlaa.ini sharp_preset` =
+  soft | balanced | crisp | extra | custom; load rule (`SharpPreset::Resolve`): no key = the preset whose three values match,
+  else custom (old files keep their values); a named preset fills the keys the file lacks, a key it sets that differs = custom.
+  Default = Soft (= the fresh-install 0.4 / 0 / colour, so a new install looks the same as before); Reset = Soft.
+- **Tests**: `tests/settings_roundtrip_test.cpp` -- `PresetRules` (Resolve / Parse / the row wrap; preset values set, size / type
+  untouched; strength row + hotkey, halo, colour -> Custom; the shadow switch from shadow_lock 0 + diag 0, the pending switch
+  reaching `g_slCfg` at the next slice set, the key's path), `IniRules` (8 dlaa.ini cases flat + VR incl. the user's two files'
+  shapes, an old file through Save, `shadow_lock` default / 0 / Save), GateCheck (preset name and values, the expert rows only with
+  Custom, the shadow row against `g_slUser` / `g_slWant` / `g_slCfg`). `settings_roundtrip_test.exe --rows-at <dlaa.ini>` prints
+  which of the new rows a player with that file sees, flat and VR.
+- **Not verified in game**: the live switch-on from a start with `shadow_lock = 0` and `shadow_lock_diag = 0` (arming from cold).
+
+### Phase 106: a view-space plate whose loose key repeats keeps its body's motion (truck trailer plate ghosting)
+
+- **Symptom** (ETS2 VR, following a truck, captures `dlaa_selftest/shimmer_20261114_175628` .. `_175705`): the trailer's number
+  plate ghosts up to ~0.9 px behind DLSS, decaying over ~4 frames. The game's input plate is clean; in 6 of 28 frames the plate's
+  motion vector was the camera R instead of the trailer's (tail lights and underrun bar always right).
+- **Cause**: the plate (GBUF, 1 instance, ic 132 / 84) is drawn in VIEW space -- its MVP is the eye's projection (column 3
+  ~ (-0.029, 0, 0.200, ~0)). When its dynamic-VB offsets repeat, the loose key (ic, startIndex, baseVertex, VS) PAIRS it with
+  last frame's draw; `ResolveDraw` then sees an origin-free MVP (round 6, `OriginFree`) and forces state 2 = the static camera
+  R, and `ParCountable` / the U list (`ParentListGroup`) only took UNPAIRED state-1 draws, so the plate was never voted or held.
+  In the frames where it did not pair, the vote gave it the trailer's R (Alt+F8: "unpaired, parent -> body").
+- **Rule** (`draw_ids.cpp` `ResolveDraw`): a paired origin-free draw that is a WORLD draw (not `kFCabin`) of at most
+  `kOFreeSmallIc` = 512 indices (instanced draws are state 4 before this) stays at **state 1** (R = the camera R, as before)
+  and is marked in `kOFreeS` (one word per draw; the unused `kMovList` words). `ParCountable` and the U list accept a state-1
+  draw that is unpaired OR marked (a continuity reject -- state 1 with a partner -- is still not listed), so it is voted, held
+  (`ParHold`) and temporally checked (`ParMotionOk`) exactly like an unpaired plate. No parent = state 1 with the camera R =
+  the same motion as before. The game's camera-relative grass batches (3360..19830 indices) and cabin draws keep the round-6
+  rule (static, never listed). Harness mutation: `SetParentMutation` bit 7 -> `FoldU.w` bit 6 (`mut106`).
+- **Log**: the static-skip field's round-6 part now reads `... held static X/frame (phase 106: origin-free small listed -- of
+  them small world draws, IndexCount <= 512, left for the parent vote A/frame, listed B/frame, took a moving parent C/frame)`
+  (Cnt [245] / [246] / [247]). The Alt+F8 dump marks such a draw `origin-free yes (phase 106: paired small world draw, left
+  for the rigid-parent vote)`.
+- **Harness**: new **S21** (`drawid_harness.exe 21`, after S20 in the full run) = S8 with REPEATING loose keys, every frame and
+  within runs of 4 frames: the view-space plate + text on the turning trailer and the far van's plate pair and are origin-free
+  (bare projection) and must still take their body's motion (every pixel, every frame, incl. the frame-50 plate hold); the
+  parked trailer's plate and the gantry sign next to the passing truck (small origin-free STATIC draws) must stay static. `mut106`
+  (the rule off) FAILS S21 exactly like the game (plates state 2, 1.2-3.2 px off). S15's camera-relative clumps are padded to
+  3360 indices (degenerate triangles: the game's smallest grass batch) and S15 checks Cnt [245] = 0. Full run 160243 checks
+  (didshadow=1 runs 160289); `cmp` against the pre-106 binary's `cmpdump`: S1-S20 0 px differ.
+- **Known limit**: with the 512-index guard removed (experiment, not shipped), S15's 12-index clumps beside the overtaking car took
+  the car's motion in some frames (2 px off) -- the temporal check cannot separate a static draw from a vehicle moving only
+  ~1-2 px / frame against it. So a SMALL camera-relative static world draw right beside a passing vehicle at its depth could
+  now take that vehicle's motion (no such draw is known in game; the next VR log's counters show how many are listed).
+- **Not verified in game**: the plate in VR (re-capture of the followed truck), sports-car plates (likely the same path).
+
+### Phase 107: tree-leaf cut-out mips (107a) + more solid thin geometry for the opt-in dither (107b)
+
+Source: the user's ETS2 flat RenderDoc captures `eurotrucks2_2026.11.14_17.59.49_frame{2247,3179,4145,7916,8453}` (taken with
+NGX failing under RenderDoc: the frames are raw, unjittered) and the ETS2 log of 2026-11-14 19:00.
+
+#### 107a: anti-aliased cut-outs (tree leaves) qualify for the phase-77 mips; the worker queue no longer drops textures
+
+- **Why.** The birch leaf alpha (frame 7916 R13758, 2048x1024 BC3_SRGB, PS 438d1a63 / a9d39be8 with VS 6d2c4e63, instanced,
+  `discard` below 0.05) covers 35.5 % at mip 0 but the game's mips fall to 34.7 / 32.0 / 28.8 / 25.6 / 22.4 / 20.3 / 19.5 % on
+  mips 1..7 (the canopy thins out with distance). Phase 77 skipped it as "soft alpha": 5.28 % of its texels are between 0.02 and
+  0.6, over `kMaxSoft` 3 %. Those soft texels are an ANTI-ALIASED RIM (1-3 texels) between alpha 0 and 255, not a soft alpha.
+- **Rule** (`src/cutout_mips.h` `Analyse`, `CountSoftOffRim`): a soft texel counts as soft only when NO texel <= 0.02 x 255 AND
+  NO texel >= 0.6 x 255 both lie within `kRimR` = 2 texels (a 5 x 5 window) -- a rim between transparent and opaque always sees
+  both, the inside of a gradient (decal fade, gloss, glass) sees one side or none. The off-rim share must be <= `kMaxSoft` (3 %,
+  unchanged). The rim pass runs only when the raw share is between 3 % and `kMaxSoftRaw` = 25 % (above: early stop, soft, as
+  before; most BC3 alphas stop there; also a > 50 % soft rate after 1/8 of the rows). `Plan::softRaw` = the raw share, `Plan::soft` = the off-rim share. `Analyse(..., rimR = 0)`
+  = the phase-77 rule (tests). The decoded mip 0 is now kept as alpha bytes instead of 3 classes (same memory).
+- **Checked on the real textures** (all 448 BC3 textures of frame 7916 dumped with RenderDoc, scratch tool, old vs new rule): 54
+  decisions change, all soft -> patched; 47 of them are textures of DISCARD draws (tree / leaf PSs 438d1a63, a9d39be8, 180589ca:
+  raw soft 3.1-11.5 %, off-rim 0.2-2.4 %), the birch: raw 5.28 % -> off-rim 0.19 % -> patched. The 7 others belong to non-discard
+  PSs (the blended wire PS a5aa1c2d, fd5e16e5 / 9c062880 masks) and phase 77b never applies mips to a texture that is not drawn
+  with a discard PS. Genuinely soft alphas stay soft (gloss texture6 of b67da69f: raw 6.85 %, off-rim > 3 %; the blended wire alpha
+  of a5aa1c2d 18.7 %; every texture with cov0 0 % stays skipped). Many patched leaf textures are left alone anyway by `Replace`
+  (the game's own mips already keep >= 85 % of cov0: e.g. 13028, 14828, 15615 keep 33-55 % on every mip).
+- **Edge brightness.** a9d39be8 / 438d1a63 do NOT multiply the albedo by t6.a (only the alpha test reads it: `o2 = 2 * v0 *
+  t6.rgb * cb0[0]`), so our binary alpha changes only WHICH texels pass the cut. The colour half is the game's box-filtered colour:
+  texels that become opaque in our mips (cut away in the game's) average leaf and background colour -- on the birch the new
+  texels have ~0.08 linear luminance against ~0.24-0.29 of the ones the game keeps. Per mip, the mean colour of all our opaque
+  texels is 0.207 / 0.203 / 0.205 (mips 3 / 4 / 5) = the mip-0 leaf average 0.206; the game's mips are brighter (0.24-0.28) but
+  sparser: coverage x luminance (the canopy's energy) is 0.073 at mip 0, 0.060 in the game's mip 5, 0.073 in ours. So far
+  canopies keep the near-field density and brightness (the individual edge texels are darker, the average is right).
+- **Queue** (`src/inject.cpp` `Cutout::FinishRecord`, `WorkerMain`): the ETS2 log shows `queue full 83` in one 0.4 s burst of
+  500 BC3 uploads (the queue at 101 textures / 141 MB a moment later: the 256 MB BYTE cap, not the 1024 count). Now (1) a full
+  queue makes a loader thread wait (`g_roomCv`, g_mx released) up to `kQueueWaitMs` = 100 ms for a worker to take a job -- only
+  when the thread is not the render thread (`g_renderTid` known and different; the render thread or an unknown one never waits);
+  then queued, or `queue full` as before; (2) `kWorkersMax` = 2 worker threads (1 below 8 logical CPUs) at below-normal priority,
+  fed by a semaphore (one count per job). Memory caps unchanged (256 MB / 1024 jobs): the fix is back-pressure + throughput, not
+  more memory.
+- **Log.** Decision lines show `soft X% (raw Y%, phase 107a rim rule)`; the level-4 stats line adds `phase 107a: N workers, loader
+  waited for room W times (T ms total, max M ms)`; the worker start line adds `(phase 107a: n of N, C logical CPUs)`.
+- **Tests** (`tests/cutout_mips_test.cpp`, CI): section 8 = synthetic anti-aliased leaves (512x256 discs, 1-texel AA rim, raw
+  soft 8.7 %, off-rim 0.01 %): soft under the old rule, PATCHED under the rim rule, our mips keep cov0 on every mip; a wide-gradient
+  decal (raw 18.8 %, between the limits) stays soft under both rules; a flat grey stays soft by the raw share. Section 9 (local
+  only, `E:\ETS2-DLAA-Injector\captures\ets2_cutout_2026-11-14`, skipped in CI): the real birch (old soft -> patched; mips 3..10
+  replaced: 28.8 / 25.6 / 22.4 / 20.3 / 19.5 % -> 35.5 %), the real gloss 12291 and wire alpha 13224 stay soft. 385 checks.
+  CPU: a 2048x1024 leaf texture ~15 ms on the worker (rim pass included). A soft texture stops early at 25 % raw OR when more
+  than half of the texels are soft after the first 1/8 of the rows (an AA rim is a thin line): the test's fully soft pattern
+  0.076 ms at 512x512 (phase 77: ~0.06), 1.0 ms at 2048x2048; the 448-texture corpus decisions are the same with and without
+  this second stop.
+- **Not verified in game**: the canopy look near / far (flat + VR), the loader-wait counts and whether a wait ever stalls the
+  game during a load (it should only lengthen the loading thread's work during a burst), the 2-worker CPU use.
+- **Still default off**: `cutout_mips` stays 0 by default in the code and the sample (phase 77 rule); turning it on by default is
+  a separate decision.
+
+#### 107b: cranes, railings and ETS2 street lights through the solid dither (`wire_widen = 1` only, still OFF by default)
+
+- **Pairs** (`src/wire_widen.cpp`; bytecode + disassembly `captures\ps_57a4e1f1 / ps_2d7ed0e6 / ps_d3af2ebb / vs_3847be86 /
+  vs_9d2904cd / vs_d87f5280` .dxbc / .txt, dumped with `scripts\rdc_dump_draw_shaders.py`, game data):
+  - **C, cranes** (frame 2247 EIDs 11884 / 13874 / 13884, 1900-2200 of 2400-4700 triangles under 1 px): VS 07dfaa00 (= pair A's)
+    + PS 57a4e1f1. Its input signature is pair A's byte for byte -> **GSolidA** + the new **PSSolidC**. The game's o3.w is
+    `bfi(1, 13, cb0[0].x, 8064)` on the RAW bits of cb0[0].x (asuint), not `ftou` like pair A's `Tail()`; o3.y = bit 5 when
+    t1.z > 0.5; o2.w = 0; o1 = (t1.y, t1.y, t1.y, t1.x^2 x 1024).
+  - **D, railings** (frame 7916: 21 draws of VS 3847be86, 12000 of 16900 triangles thin; + VS 9d2904cd, BLENDINDICES /
+    BLENDWEIGHT, 2 draws; + VS d87f5280 instanced, 1 draw): PS 2d7ed0e6, discard if t6.a < 0.05 (0x3d4cc000) -- kept, BEFORE the
+    dither. **PSSolidD**.
+  - **E, ETS2 street lights** (frame 7916 EIDs 8574 / 8578: DrawIndexedInstanced, 5 / 14 instances, 1822 triangles, all thin): VS
+    d87f5280 (instanced: packed position + quaternion in TEXCOORD4 / 5) + PS d3af2ebb (= 2d7ed0e6's maths without the discard,
+    o3.z without bit 0). **PSSolidE**. ETS2's counterpart of the ATS phase-66 lights.
+  - The three VSs share ONE output signature (COLOR0, SV_Position, TEXCOORD0..3 float3, TEXCOORD4 float4, TEXCOORD5 float2,
+    registers 0..7) that fits neither GSolidA (5 registers) nor GSolidB (6) -> a new **GSolidD** (same `MakeBand`, VD / VDK
+    structs). D and E share it.
+  - Exact literals from the bytecode (`D3DDisassemble` with hex literals): 2.0078125, -1.0078125, 0.39990234375, 0.60009765625,
+    0.04998779296875. Note: `sample r.z, t1.yzxw` writes t1.**x** (the destination .z takes the 3rd swizzle component).
+- **Kind overflow fixed.** inject.cpp stamped forward records with `1 + g_lastSolidKind` and `BindReplay` indexed
+  `g_gsSolid[kind - 2]` for 2 / 3 only: a third PS kind would have overflowed. Now `WireWiden::SolidKind` (1 A .. 5 E) picks the
+  PS copy, `SolidGsOf(kind)` the GS (A / C -> GSolidA, B -> GSolidB, D / E -> GSolidD) and `SolidReplayKind(kind)` = 2 + that GS
+  index (2 / 3 / 4) is what both inject.cpp sites stamp; `BindReplay` accepts 2..4 only. `IsSolidVs(vs, kind)`: A / C use pair A's
+  VS set, D / E the new set of 3847be86 / 9d2904cd / d87f5280.
+- **Gates**: unchanged -- `wire_widen = 1` (default 0), G-buffer pass, DLAA running, the phase-80 static gate (`SolidDitherOk`)
+  for non-instanced draws (cranes, railings: dithered only once the per-draw MVs know them as static; 9d2904cd's skinned draws
+  likewise), instanced draws (street lights, d87f5280 railings) by the old rule. ShaderCache ids `kSolidGsD`, `kSolidPsC / D / E`
+  appended before `kCount`; CMake fxc validation + embedding for the 4 new entries. `EnsureSolid` creates 3 GS + 5 PS (a failure
+  leaves every solid pair to the game, logged with the shader's name).
+- **Log**: one `wire widening (phase 63): first solid thin draw dithered -- <pair> (instanced), ..., replay GS kind N` line per
+  kind and instancing (crane lattice / railing / ETS2 street light named); the level-4 wire stats count `solid N / 11` (6 VS + 5
+  PS objects known).
+- **Harness** S107 (`drawid_harness.exe 107`, in the full run): the kind -> GS / replay mapping; the three VSs' output signatures
+  are identical and = GSolidD's input; pair C's PS input = pair A's; the copies at k = 1 vs the game's bytecode on 4 targets
+  128 x 64: **C, D, E bit-exact** (D with t6 alpha below the cut: the same 53 pixels discarded), pair C's o3.w at cb0[0].x = 1.1f and
+  3.0f (raw bit 0 clear, ftou bit 0 set: 8064 like the game); GSolidA + PSSolidC, GSolidD + PSSolidD / E on a 0.06 px ribbon over
+  64 frames: 108 / 108 columns, mean coverage 0.060; a 3 px ribbon unchanged (0 words). 30 checks (the game-data checks skip
+  without `captures\`).
+- **Risks / not verified**: nothing in game (do far crane lattices / railings / ETS2 lights look steadier or just fainter; the
+  per-pass dithered counts). The forward-depth / forward-id replays draw the full band WITHOUT the railing's alpha cut (as for
+  every widened draw: the replay PS has no texture) -- band pixels over a railing's holes take the railing's depth / id; for far
+  (sub-pixel) railings that is the intended band. Railing draws whose near triangles are wide pass through the GS unchanged and
+  run the exact copy (bit-exact). The 9d2904cd draws carry blend weights: if they animate, the phase-80 static gate keeps them
+  undithered.
+
+### Phase 108: the shader census -- find, show and dump the draws likely to flicker (`census`, `census_dump`, `census_max_mb`)
+
+- **Why.** Every flicker fix so far started with a RenderDoc capture of the exact spot. The census lets the mod find the
+  candidates by itself while the player drives, show them live, and save enough per new suspect that a developer can port the
+  shader and judge it without a capture. After a drive the developer reads ONE file: `dlaa_census.txt` next to `dlaa_inject.log`.
+- **Files.** `src/census.h` (pure, both builds: the DXBC classifier `ScanPs`, `Judge`, `ThinVerdict`, `Impact`, the texts,
+  `DdsHeader`, the HLSL block `kCensusTintPs`); `src/census_run.h` (the D3D / hook side: PART OF `inject.cpp`, included once
+  inside `WITH_DLAA` right before `hkDrawIndexedInstanced`; it uses inject.cpp's globals and has no `#include` of its own: it is
+  read inside inject.cpp's anonymous namespace); `tests/census_test.cpp`.
+- **Kinds** (one bit each, `Census::Kind`; a pair VS + PS can have several):
+  - **pixel-reader** (magenta): the PS `ld`s a texture at an integer pixel computed from an INTERPOLANT -- a perspective divide of
+    an input register by a component of the same register (`div r, vN.yz, vN.x`, never the `SV_Position` register), times a
+    constant-buffer value, `ftoi` / `ftou`. With the phase-23 (W+1) x (H+1) overscan that index is one texel off over most of
+    the picture. Found by the 2026-11-14 audits: 9a5fca98 (old SCS water forward), 9c062880, b0852ebe, 1a104d6e, a5aa1c2d,
+    0a3c1386, 079791a9, 19f12dc2, 31586e4b, fd5e16e5 -- all classify pixel-reader on their real bytecode; the corpus has 22 such
+    PSs (also 1d656a5d, 1e829469, 4e0422e2, 78449ac1, d602b470, 68ad6bcb and the wire hardware b97c44a3 / 3cc84c95 / cedce1aa).
+  - **cut-out** (orange): a `discard` whose condition comes from a texture fetch; the taint walk records which t-slot(s) feed it
+    (the alpha source). The texture bound there is looked up in the phase-77 decision table (`Cutout::CensusWhy`, below).
+  - **thin** (cyan): measured, not read from the bytecode: occlusion queries around sampled draws (`kQueriesPerPresent` = 8 per
+    Present, read 2+ Presents later with `DONOTFLUSH`); thin = < 0.5 px per triangle over >= 3 samples of >= 64 triangles.
+    Samples: draws of an interesting PS until the pair has 32 (suspect) / 8 samples, every 16th draw of any other PS of the
+    jittered passes (the thin search over the whole scene).
+  - **water-like** (blue): a projective `sample` (address from a divide of a value by a component of the same register) AND a
+    pixel `ld` or >= 2 scrolling samples (interpolant + constant). 9a5fca98, 78449ac1, d602b470 in the corpus.
+  - **unknown-VS** (yellow): a wire PS (`WireWiden::PsKind`) or a solid PS (pairs A..E by checksum) drawn with a VS outside its
+    VS set. The lamp VS ccd6b6d1 with the solid PS b67da69f is one.
+- **KNOWN = covered, per kind** (`Census::Judge`): pixel-reader and water-like by phase 97 (`WaterPs::Classify` rule != 0: the
+  parity checker shaders are drawn without the overscan); thin by wire_widen's pairs (phases 61-66, 107b: wire VS + wire PS,
+  solid PS + a VS of its kind's set -- covered also while `wire_widen = 0`: the feature exists); cut-out when the alpha texture's
+  phase-77 decision is patched / applied / no loss. Not counted as fixes: draw ids / plates (motion only), the lighting redraw /
+  full-screen light jitter (phases 55 / 78: lighting-bind draws the census does not look at), the glow bias mask, shop windows.
+  So a5aa1c2d (a known WIRE PS) stays a pixel-reader suspect: nothing fixes that kind for it.
+- **Where** (`inject.cpp`): `hkCreatePixelShader` / `hkCreateVertexShader` -> `CensusNotePs` / `CensusNoteVs` (one `ShInfo` per
+  distinct checksum: the scan, the water / wire / solid facts, the bytecode up to 96 MB; a lock-free pointer table for the
+  draws). `hkDrawIndexed` / `hkDrawIndexedInstanced`, gated by `CensusGate` (census live, game context, not our work, a
+  jittered world / mirror pass `g_jitterPass || g_mirJit`, not a preview): `CensusRun::Before` right before the game's draw,
+  `AfterDraw` (the query's End) right after it, `Tint` at the end of the hook (game state back, the draw's own viewport --
+  before phase 97's water edge fill). `hkVSSetShader` notes the VS (did_shadow hooks it; ClearState / ExecuteCommandList /
+  SwapDeviceContextState mark it unknown; every 256th slow call compares it with `VSGetShader`, a mismatch = the getter from
+  then on). `PresentFrameWork` -> `CensusOnPresent`. Keys in the debug-key block. `OnProcessDetach` -> `CensusAtExit`.
+  `CaptureStatus` -> `CensusStatus` (the legend in the status box for 10 s, when no capture runs). Draw / DrawInstanced /
+  indirect draws are not looked at. `CensusStart` (SetupThread, after the hooks) makes it live; a new game device stops it.
+- **Fast path** (every draw of the gated passes): the PS pointer memo (`g_lodPsCur` vs the last one + the table generation),
+  one flag (the PS has a structural kind, a known VS set, or a thin pair), a counter for the thin sampling -- then return.
+  **Slow path** (interesting draws): the VS (the hook's note), the pair (memo for the same VS + PS, else an open table, 4096
+  pairs), its counters (frames seen, draws, IndexCount range, instanced, passes), the first-sight state text once per pair
+  (blend / depth-stencil / rasterizer / topology, every declared t-slot's format / size / mips / role, the samplers), the
+  cut-out reason (re-read 3 times, 10 / 20 / 30 s later: the phase-77 worker may decide after the first sight), the verdict,
+  a query, the tint decision. A NEW suspect logs one line (`census (phase 108): NEW suspect #i -- kinds | VS PS | pass ...`, 64
+  max) and queues its dump. The mod's own D3D calls in there run with `t_inDlaa.Quiet` (the hooks pass them through).
+- **Tint** (`Ctrl+Shift+F5`, `key_census_view`; flat and VR, G-buffer and forward, mirrors too): the same draw again with the
+  census PS (`kCensusTintPs`: no inputs, so it links with any VS; one colour from cb13: 10 immutable buffers = 5 kinds x albedo /
+  HDR (x2)), a blend state with RT0 = SRC_ALPHA (0.7) / INV_SRC_ALPHA on RGB only and RT1..7 write mask 0, and a twin of the
+  game's depth-stencil state without depth or stencil writes (EQUAL when the game's state wrote depth: the draw's own pixels;
+  else the game's own test). PS + class instances / cb13 / blend + factor + mask / DSS + ref restored from the getters; binds
+  with `t_inDlaa.Quiet` (VRS untouched), the draw through the trampoline. The tinted G-buffer albedo is then lit by the game;
+  DLSS sees the tint as part of the picture. View off = no re-draw and no state read.
+- **Census file** (`dlaa_census.txt`, written by the census writer thread every 60 s from a snapshot taken at Present, after a
+  mark, and directly at process exit): a header (mode, the relevant switches, counters, the kind legend), the suspects sorted by
+  impact = kind weight (pixel 3, water 2, thin 2, cut-out 1, VS 1) x frames seen x (1 + avg pixels / 1000), each with VS / PS in
+  wire_widen.cpp's `ChecksumIs` constant format, kinds / covered, the facts (water rule, wire / solid kind, VS in set, cut-out
+  reason), the PS scan counts, first seen (local time, seconds since start, Present #, pass, viewport), frames seen, draws,
+  IndexCount range, instancing, screen pixels (avg / max from the queries) and px per triangle, the first-sight state, the dump
+  folder and the marks it was on screen at; then the KNOWN pairs (one line each) and the MARKS. **Camera world position: not
+  available** -- the game sends only camera-relative matrices (CAPTURE_FINDINGS.md: no per-frame view cbuffer), the file says
+  so; time + Present # + the pictures place a suspect.
+- **Dump per new suspect** (`census_dump = 1`): started at the pair's next draw (its state is bound) when >= 2 s since the last
+  dump and the budget allows; `dlaa_census\<vs8>_<ps8>\`: `vs.dxbc`, `ps.dxbc` (+ `vs.txt` / `ps.txt` = `D3DDisassemble`, only
+  when `d3dcompiler_47.dll` loads -- Proton may not have it), `draw.txt` (the census entry + what was saved), `tex_tN.dds` for
+  every declared PS t-slot that is a Texture2D, not a render target / depth, MSAA-free, <= 32 MB, a known format (DX10 DDS, every
+  mip and slice), `ps_cb0..3.bin` / `vs_cb0..1.bin` (the bound D3D11.1 windows, <= 64 KB each), and `picture.png` = the presented
+  frame (the back buffer; VR = the mirror window) with ONLY this pair tinted for ~6 Presents (DLSS history), halved while wider
+  than 1920 px. Read-back without a stall: `CopyResource` / `CopySubresourceRegion` into staging at the draw, `Map(DO_NOT_WAIT)`
+  at later Presents, the mapped pointers handed to the writer thread, `Unmap` once it is done (`PumpGrabs`; dropped after 600
+  Presents). Caps: 200 dumps, `census_max_mb` (default 500) on disk, 64 MB per dump, 192 MB of staging in flight.
+- **Mark** (`Ctrl+Shift+F6`, `key_census_mark`): MARK n with the local time, seconds, Present # and every suspect drawn in the
+  last 2 Presents -> the census file (the pairs list their marks too) + `dlaa_census\marks\mark_NN.png` (next Present) + a status
+  box note for 4 s + 2 beeps; the file is rewritten at once.
+- **Cut-out reasons** (`Cutout::NoteWhy`, a direct-mapped 8192-entry pointer table under `g_mx`): set at every phase-77 decision
+  -- mip 0 decided at once (shape / cache hit: soft, coverage, no loss, size), a record waiting for the worker (`pending`, or
+  `patched` on a cache hit), the worker's verdict, `queue full`, and `applied` when our mips go up at the first discard draw.
+  The census adds `cutout_mips = 0`, `format not BC3` (BC1 / BC7 / RGBA cut-outs: phase 77 handles BC3 only), `no Texture2D`,
+  and `not seen by the uploader` (created with initial data, or its slot was taken by a later texture).
+- **dlaa.ini** (startup only, flat `if`s outside the LoadConfig chain: C1061): `census` 0/1 (default **1**), `census_dump` 0/1
+  (default **1**), `census_max_mb` 16..4096 (default 500); keys `key_census_view` (`Ctrl+Shift+F5`), `key_census_mark`
+  (`Ctrl+Shift+F6`), both on the Hotkeys page ("Shader census view" / "Shader census mark"). Not menu settings: Save / Reset
+  leave the lines alone (settings_roundtrip `CensusRules`). Defaults on because the view-off cost is ~0 (below) and the dumps are
+  rate-limited, capped and written off the render thread; `census_dump = 0` keeps only the text file. No menu row.
+- **Cost** (estimated from the code, NOT measured in game; the in-game figures are the level-4 line `census (phase 108): N pairs,
+  suspects S, CPU per Present: slow path .. ms, tint .. ms, Present work .. ms (fast-path calls N per Present, not timed) ...`
+  every 60 s): fast path ~3-5 ns per draw of the jittered passes (1500 draws -> ~6 us); slow path ~40-80 ns per draw of an
+  interesting PS (pixel-readers, cut-outs: a few hundred draws in dense scenes -> ~15-30 us); + every 16th other draw (~100
+  lookups -> ~5 us); 8 queries (~1 us each); Present work a few us, a snapshot copy of the pairs every 60 s (~0.1-0.3 ms once a
+  minute). Expected under the 0.05 ms per Present budget flat; VR (two eyes) about twice the per-draw part -- check the line.
+  The tint view costs one extra draw per suspect draw (GPU) while it is on. No render-thread file write (the exit write runs in
+  DllMain with the other threads gone).
+- **Tests.** `tests/census_test.cpp` (CI, `build_census_test.bat`, linked with `wire_widen.cpp` WW_NO_D3D): fxc look-alikes --
+  the reader (pixel-reader, slots t10 / t12), the same read from SV_Position (nothing), the phase-97 parity reader (pixel-reader
+  + parity, covered by water_ps), an alpha test on t6 (cut-out, slot 6; covered exactly for patched / applied / no loss), a
+  dither discard (not a cut-out), water-like, plain; truncated / garbage blobs and a VS do not parse; the Judge rules, thin rule,
+  impact order, `ConstText`, `MipRows`, `DdsHeader`. Locally (skipped without `E:\ETS2-DLAA-Injector\captures\census_2026-11-14\`
+  -- 65 game .dxbc copied from the 2026-11-14 RenderDoc dumps -- and `captures\*.dxbc`): the ten audited readers = pixel-reader
+  and not water_ps; 9a5fca98 water-like; the 11 known wire / solid pairs (the real WireWiden sets): thin and VS always covered,
+  solid pairs no suspect at all (pair D's alpha test until its texture is patched), the wires pixel-reader (+ cut-out for
+  b97c44a3 while unpatched); ccd6b6d1 + b67da69f = unknown-VS; all 55 game PSs parse. 167 checks. `census_test.exe <folder>`
+  prints every `*.dxbc`'s classification. settings_roundtrip `CensusRules`: defaults, clamps, the two key defaults + rebinding,
+  the Hotkeys page lines, Save / Reset keep the census lines.
+- **Not verified (nothing in game yet):** the cost figures; the tint's look in the G-buffer (lit albedo) and forward (HDR x2) in
+  flat and VR; that the game's state is intact after every tint re-draw; occlusion queries overlapping the game's own; the DDS
+  files in a viewer; `D3DDisassemble` under Proton; the back-buffer picture in VR (mirror window) and in present-layer mode (no
+  swap chain there: no picture); the cut-out reasons against the phase-77 log lines; how many pairs a long drive produces (4096
+  cap).
+- **Known limits.** Shaders created before the hooks are not classified (counted). Pair key = the two bytecode checksums, so one
+  pair can mix different meshes; IndexCount range and pixels are per pair. Thin = triangles from IndexCount / 3 (strips count
+  high). The census sees DrawIndexed / DrawIndexedInstanced only. With `cutout_mips = 0` (the default) every alpha-tested draw is
+  an orange suspect (weight 1: they sort last).
+
+### Phase 109: the 2026-11-14 RenderDoc audits -- pixel readers, power lines, old water VRS, thin poles, more solid pairs, leaf rim
+
+Source: five read-only RenderDoc audits of the user's ETS2 flat captures `eurotrucks2_2026.11.14_19.23.22_frame*` (town, forest,
+water, causeway, village; NGX was failing under RenderDoc, so the frames are raw / unjittered). Shader bytecode + disassembly used
+by the tests: `captures\phase109_2026-11-14\` (and the five new blobs copied to `captures\`; game data, outside git).
+
+#### 109a: the forward pixel readers read their own texel under the overscan (`pixel_reader_fix`, default 1, startup only)
+
+- **Bug.** Forward re-draws (road / water decals 1a104d6e / b0852ebe / 9c062880, lane markings + the long wire PS a5aa1c2d, the
+  old SCS water forward PS 9a5fca98, 0a3c1386, 079791a9, 19f12dc2, 31586e4b, fd5e16e5, ...) find their pixel in the lighting
+  (t10 / t11) and G-buffer (t12..t15) targets as `ftoi(vN.yz / vN.x * cbA.xy * cbB.xy / cbB.zw)` -- the interpolated clip position
+  times the viewport size (captured: cbA = (1, 1, 1, 1), cbB = (W, H, 1, 1) for the 2880x2160 pass and the 256 / 512 probe passes),
+  not SV_Position. Under the phase-23 (W+1) x (H+1) viewport that is the left / upper neighbour wherever `x > (0.5 - s) W`
+  (about half the jitter phases mid-screen, always at the right / bottom): thin lit edges change colour per frame, the old water
+  reads the shore's normals. Phases 25 / 78 / 97 had fixed the same class for fog / lighting / the new water only.
+- **Fix = a bytecode TWIN** (`src/pixel_reader.h`, pure; `inject.cpp` block after `WaterOnDrawEnd`): at `CreatePixelShader`
+  `PixelReader::Make` proves the shape (a `div` of an input register's .y / .z by its .x, then only multiplies / divides by
+  constant-buffer data, `ftoi` / `ftou` of both axes from a temp without modifiers, every use of the integer pixel an `ld` / `ld_ms`
+  address with x = axis 0 and y = axis 1, no parity, and `Census::ScanPs`' wider walk must count exactly the same pixel loads),
+  then patches ONE operand per index: the `ftoi` source becomes the SV_Position register (v0 / v1: in every audited input
+  signature, unused), swizzled per axis. SV_Position.xy = p + 0.5 whatever the viewport, so `ftoi` = p = what the game computes
+  at its own W x H viewport (`floor(p + 0.5 - s)` for |s| < 0.5). If the shader never declared SV_Position, a 4-token
+  `dcl_input_ps_siv linear noperspective vN.xy, position` is inserted (register order), the ISGN element's used-mask gets xy, the
+  chunk / program sizes and the chunk table move, and the DXBC checksum (MD5 variant, `PixelReader::Checksum`; verified against
+  every game and fxc blob, both padding branches, and accepted by the D3D runtime) is recomputed. The perspective divide and its
+  multiplies stay as dead code. Chosen over a per-shader HLSL port because one proven generic patch covers all 21 readers found
+  (the census will add new ones automatically) and keeps every other instruction of the game's bytecode.
+- **Assumption** (not checkable from the bytecode): cbA x cbB.xy / cbB.zw = the viewport size (the game reads the texel of the
+  pixel it shades). True in every audited draw. The swap therefore only happens when the overscan is really applied (`g_vpOver`:
+  jittered world / mirror pass at the pass size) and the game's viewport 0 starts at 0, 0 (flat multi-view screens with an offset
+  origin keep the game's shader: SV_Position would be off by the origin).
+- **Draw path** (`PrOnDrawBegin` / `PrOnDrawEnd` in `hkDrawIndexed` / `hkDrawIndexedInstanced`, right before / after the game's
+  draw): the twin of `g_lodPsCur` (an open-addressing table keyed by the game's shader object, 1024 slots, lock-free reads, memo
+  per PS + generation; replaced twins are kept alive in a graveyard) is bound with `t_inDlaa.Quiet` (the DidShadow PS bank hears it
+  through the hook; `g_lodPsCur` stays the game's), then the game's PS again right after the draw, before anything reads the PS
+  back (census tint, forward record, glow bias). Skipped: no PSSetShader hook, no overscan, viewport origin != 0, a WireWiden PS
+  copy already bound (pole hardware), class instances. VRS / census / draw ids see the game's PS. Cost: 2 extra PSSetShader per
+  pixel-reader draw (~50-300 per frame in dense scenes; not measured), 0 GPU.
+- **Census**: `Cover::pixelFix` = the PS has a twin -> the pixel-reader and water-like kinds are KNOWN (`Census::Judge`).
+- **Log**: start `pixel reader fix (phase 109a): pixel_reader_fix=N (...)`; per shader `PS <ptr> <sum> -> twin <ptr> (n index
+  conversion(s) from SV_Position vN, declaration added, m pixel load(s))` or `... gets NO twin: <why>` (48 lines max); once `first
+  draw with a twin (...)`; level 4: the lighting-redraw stats line ends with `| phase 109a pixel_reader_fix N: draws with a twin A,
+  twin NOT bound: no overscan B, viewport origin C, PS copy D, class instances E; twins T (shaders: ...)`.
+- **Test** `tests/pixel_reader_test.cpp` (CI; `build_pixel_reader_test.bat`): checksum of every fxc / game blob, a changed byte
+  fails, both MD5 tail branches accepted by `CreatePixelShader`; `Make` on look-alikes (the audited chain -> twin with the dcl
+  inserted and `ftoi r0.xy, v1.xyxx`; SV_Position reader, plain shader -> none; parity reader, an offset before the conversion, a
+  neighbour read -> no twin; truncated / wrong checksum -> no twin; the twin itself is no reader any more). WARP for the look-alike
+  and (locally) every game reader: (b) the twin vs the game's bytecode at the game's W x H viewport shifted by the 8 Halton phases,
+  perspective quad + varying interpolants: **0 differing words** on all 21 twins; (c) with every other interpolant constant the
+  twin under the (W+1) x (H+1) viewport = the game at W x H on every pixel both draw (17 shaders whose projected position feeds only
+  the index; 4 also use it for a projective reflection lookup: (c) skipped for them), and the game's own shader under the overscan
+  differs (the bug) for 20 of 21. All 10 audited readers get a twin.
+- **Not verified in game**: the look of the decals / lines / old water; the swap counts; flat multi-view (skipped by the origin
+  rule), mirrors and VR (should work: their passes start at 0, 0); the 95cb3ab8-style readers whose projected position also feeds
+  other maths.
+
+#### 109b: the game-widened power lines in the forward depth without alpha-to-coverage (`power_line_fix`, default 1, startup only)
+
+- **Bug** (village audit, 4 of 6 frames): the ETS2 power lines are drawn by the game ~1.1 px wide (G-buffer VS 7e42d0ff + PS
+  848f389f collapse to nothing far away; forward VS 277d2302 + PS 69dcaf36 widen to max(clip w x cb0[13].x, radius) with alpha =
+  radius / width, SrcAlpha / InvSrcAlpha, depth GREATER, no write). They qualify for the forward-depth replay, which with
+  `mv_fwd_conservative = 1` uses alpha-to-coverage -> alpha < 0.5 pixels get no depth / MV -> smear and dashes while driving.
+- **Fix**: `WireWiden::IsGameWirePs / IsGameWireVs` (identity sets by checksum); `PowerLineStamp` (inject.cpp, next to
+  `WireOnDraw`) stamps the forward record `DrawIdRecord::kGsNoA2c` (0x40); the replay (`draw_ids.cpp` ReplayImpl) binds no GS for
+  it but the depth batch's no-A2C blend state (`g_replayNoA2c`), and back to the A2C state for the next unstamped draw (the blend
+  switch is now tracked separately from the GS: `boundNoA2c`). ~12 draws per frame.
+- **Harness** S64 (+3 checks): a 1.1 px alpha-0.3 line: unstamped (A2C) 27 / 108 columns of depth (WARP dithers A2C at 1x),
+  stamped 108 / 108, <= 2 rows, no GS bound; [stamped, unstamped] -> the second draw back on A2C. Census: the pair's thin kind is
+  KNOWN (`Cover::gameWire`).
+
+#### 109c: the old SCS water's G-buffer at full VRS rate (VR)
+
+- `WaterPs::kRuleVrsOnly` (5): PS d093c12a (river) and 9917e274 (causeway sea) by checksum, in the phase-97 table -> `VrsOnDraw`
+  runs them at full rate (the phase-98 rule; phase 98b also keeps that eye pass's lighting at full rate). `WaterOnDrawBegin` skips
+  them (`WaterPs::OverscanExempt`: rules 1..4 only) -- no overscan exemption (no checkerboard; the depth must stay on the ground's
+  overscanned grid). Census: the VRS-only rule covers nothing. No own ini key (as phase 98). Test: `water_ps_test` (patched
+  checksums + the real blobs locally). Not verified in VR; cost = full rate for those draws (+ that pass's lighting) when old water
+  is in view.
+
+#### 109d: Thin pole fix (`pole_aa`, default 0; key `key_pole_aa` Ctrl+Shift+F4; menu row "Thin pole fix", Picture)
+
+- **Target** (forest audit): the ETS2 red / white road poles: body VS 3847be86 + PS 2d7ed0e6 (pair D), 198 / 18 indices near / far;
+  stripe band VS 07dfaa00 + PS e19e0136 (also road-sign faces). 1.885 m tall, ~3.5 cm wide = 1 px at ~55 m.
+- **Why not the wire dither**: every triangle gets its own tent on the SAME per-pixel noise, so overlapping face bands keep the max
+  of their shares, not the sum: 40 .. 60 % of the pole's ink.
+- **Pole mode** (GS `g_q.z = 1`, `BindSolid(..., pole = true)`): each widened triangle is a BOX `pole_min_px` (W, default 1.5) wide
+  (no tent, no floor). The PS keeps a band pixel when its noise falls in the triangle's ACROSS INTERVAL seen from that pixel: the GS
+  gives the triangle's two long edges as lines (normals oriented by one rule), the band vertices carry the signed distances to them
+  (`noperspective float2 dl : TEXCOORD8`, exact at the pixel centre), and `Dropped` keeps when `frac(ign + 0.618 frame - lo / W) <
+  (hi - lo) / W` (kf = (W, frame, 1, -1) marks pole mode). The two triangles of a face share the diagonal, neighbouring faces their
+  corner line, so at every pixel the windows are disjoint and add up to the pole's width / W. A first design with one offset per
+  face (`frac(u_min / W)` along an axis) failed the harness: the two triangles of a face got different offsets (the screen position
+  times the triangles' +-h / L tilt), 1.5 - 2 x the ink.
+- **Gate** `PoleOnDraw` (inject.cpp, before `SolidOnDraw` in both draw hooks; independent of `wire_widen`): `pole_aa`, kinds D /
+  H with their VS sets, DLAA running, not passive, the world viewport layer, the phase-80 `SolidDitherOk` static gate for
+  non-instanced draws, full VRS rate for the draw, the band recorded for the forward depth (as phase 64). Kind H (e19e0136,
+  `PSSolidH`, 13-instruction port: 2 x t6.rgb x COLOR.rgb, o1.xyz = t6.a x COLOR.a x 0x3e4cc000, o1.w = 60, o2.w = 0, o3.w =
+  bfi(1, 13, ftou(cb0[3].x), 8064)) is pole_aa's ONLY: `SolidOnDraw` skips it (road signs are never wire-dithered). The solid kind is
+  looked up once per PS change (`SolidKindCur`: memo on `g_lodPsCur` + `WireWiden::PsGeneration()`), not per draw.
+- **Menu / keys**: row `MR_POLE` after Steady own shadow, hidden (phase 87) without the PS hooks or while the main scene runs no
+  DLAA; Left / Right = `TogglePoleAa` (beeps); Save writes `pole_aa`, Reset removes it (0); `key_pole_aa` on the Hotkeys page
+  ("Thin pole fix on / off"). `pole_min_px` 1.0 .. 4.0, startup only.
+- **Harness** S107 (e): three adjacent 0.4 px faces: pole mode 1.191 rows of ink per column (want 1.2), one face 0.368 (0.4); the
+  wire mode on the same pole 0.583. `PSSolidH` bit-exact vs e19e0136. settings_roundtrip `Phase109Rules`.
+- **Not verified in game**: everything (look, flicker, cost; the replay band is the wire mode's 2 W tent, not the W box -- fixed in 109r).
+
+#### 109e: more solid pairs for the opt-in wire_widen family (`wire_widen = 1` only)
+
+- Pair A's VS set + **ccd6b6d1** (Norway / town lamp posts; OSGN byte-identical to 07dfaa00's -- harness check).
+- **Kind F** = fences / ETS2 town street lights: VS e5a4956d (= 3847be86's OSGN with a float4 TEXCOORD5) + PS 2cc0a6fa -> new
+  **GSolidF** (VF / VFK) + **PSSolidF** (37-instruction port, the pair-D normal / AO, the t1 detail blend by COLOR.w, t6 x t0).
+- **Kind G** = PS cfc52d43 with pair A's VSs (far bridge railings, chain-link posts, rigging): **PSSolidG** keeps the game's
+  `t6.a x COLOR.w < 0x3d4cc000` discard FIRST, then the dither; o3.z = q << 2 | 1.
+- Kinds now 8 (A..H), GS 4 (A, B, D, F); `SolidReplayKind` 2..5; ShaderCache ids `kSolidGsF`, `kSolidPsF / G / H` (+ CMake fxc
+  validation / embedding); `WireWiden::SolidPsKindOfCode` (census + tests). The GS bodies are one shared code shape for A / B / D / F
+  (the kSolidGs raw string is split for MSVC's 16 KB literal cap). Optional ade56cbc / fa191fed: NOT built (each needs
+  another bit-exact port + harness pair; left for later -- the census keeps listing them).
+- **Harness** S107: F / G / H copies vs the game's bytecode at k = 1: **bit-exact** (G with discards), the signature checks, the
+  0.06 px ribbons through GSolidF / GSolidA (mean coverage 0.060), 3 px ribbons unchanged.
+
+#### 109f: cut-out mips rim radius 2 -> 3 (`src/cutout_mips.h` kRimR)
+
+- Over 1466 BC3 textures of the town / forest / water dumps: 9 decisions change, all soft -> patched: the leaf textures of the
+  discard PSs 438d1a63 (R18072 / R19440 / R20675, 3-4 texel rims) and a9d39be8 (R20237) + 5 textures of non-discard PSs (a5aa1c2d,
+  9c062880 masks, one unlabelled 128x64) that phase 77b never patches (mips go up only at a discard draw). Gloss 12291 and the wire
+  alpha 13224 stay soft. `cutout_mips_test` section 9 + the two leaf textures (`captures\ets2_cutout_2026-11-14\leaf_*`): soft at
+  radius 2, patched at kRimR. (`cutout_mips` itself stays default 0.)
+
+#### Phase 109 test run (2026-11-14, local, with the game bytecode under captures\)
+
+drawid_harness 160308 / 160308 (plain), 160354 / 160354 (did_shadow + verify), 160354 / 160354 (+ the PS / OM bank) -- S64 9 / 9
+(+ 109b), S107 61 / 61 (+ F / G / H copies, GSolidF, pole mode); pixel_reader_test 320 checks; census_test 202; cutout_mips_test 390;
+water_ps_test all passed; settings_roundtrip 105615 (from an empty folder); hotkey_scan 42; lod_scope 239; every other CI test
+passes unchanged. Nothing tested in game.
+
+### Phase 109r review fixes (2026-11-15, the code review of phases 101-109)
+
+- **Draw-id static bitmask** (`src/draw_ids.cpp` ResolveDraw): phase 106 had broken the `if (oFree) ... else if (state == 2 ...)`
+  chain -- the static branch hung off `if (oSmall)`, so LARGE origin-free paired draws (grass, cabin) also set their bit in the
+  static skip bitmask (dwords 384..511) / Cnt [210] while being reset. Restored (one chain; the kOFreeS mark stays a separate
+  statement). New `Stats::statConflict` (a draw in both the static and the reset bitmask, must stay 0); drawid_harness S15 checks
+  it (0 over 88 feeds) and the mutation `mut109` (FoldU.w bit 7, SetParentMutation 256) brings the bug back: S15 FAILS (1408).
+- **Log formats**: `TogglePoleAa` passed the double to `%llu`. `src/log.h` now has a check-only mode (`cl /Zs /DDLAA_FMT_CHECK`):
+  every Log* also goes through `printf` in a dead branch, so MSVC's C4477 / C4473 check every format string. All of `src\*.cpp`
+  (inject.cpp with census_run.h, cutout_mips.h, pixel_reader.h...) is clean; the one other hit (xr_hook.cpp EgFailLocked: `%p`
+  session without its argument, an older phase) is fixed.
+- **Census** (phase 108): `census` and `census_dump` default to **0** (a dev tool). The tint runs ONLY while the census view is on:
+  a dump taken with the view off no longer tints its pair for 8 Presents (random magenta / orange flashes for every player) and
+  its picture.png is untinted. G-buffer draws tint **RT2** (o2 = albedo; o0 normal, o1 specular -- checked against the bit-exact
+  ports PSSolidA..H) with a second PS `PSGbuf` (SV_Target2; ShaderCache `kCensusTintGbufPs`, fxc-validated + embedded) and a
+  blend state that writes RT2 only; forward draws keep RT0. The tint saves / restores PS cb13 with its D3D11.1 window
+  (`PSGetConstantBuffers1` / `PSSetConstantBuffers1`). No write at process exit any more (`CensusAtExit` is a no-op: the loader
+  lock after the other threads were killed could find g_pairs half-updated or the heap lock held); instead the file is written
+  ~5 s after each NEW suspect, plus every 60 s and at a mark.
+- **Steady own shadow** (phase 103): the slices are shifted only while `MainDlaaRuns()` (the row's own condition) -- DLAA off /
+  passive / "DLAA off to compare" show the game's own shadow (an unshifted set leaves every reader alone; stats field "main DLAA
+  not running"). `ShadowLockUsable()` = draw hooks AND `g_didShadowOn` AND (once known) `g_slNoOvw != 0`: the row hides when the
+  lock cannot work. The periodic window lines (1-2 KB each, every 600 Presents with `shadow_lock_diag = 1`) are LogDbg (level 4);
+  arm / disarm lines and the one-time warnings stay at level 3.
+- **Thin pole fix** (109d): `PoleAaUsable()` also needs the solid shaders (`WireWiden::SolidDead()`: a GS / PS / cb creation
+  failure, until Reset) -- the row hides. The forward record of a pole-mode draw is stamped `kind | DrawIdRecord::kGsPole` (0x80 =
+  `WireWiden::kReplayPole`): `BindReplay` binds the GS in POLE mode with `pole_min_px` (`SetReplayPoleMinPx`), so the depth / id band
+  is the colour's W box, not wire_min_px's 2 W tent (harness S64: the stamp reaches the replay callback with its bit, 108 / 108
+  columns). **Scope NOT narrowed (known risk)**: `PoleOnDraw` takes every kind-D draw (PS 2d7ed0e6 with VS 3847be86 / 9d2904cd /
+  d87f5280); the phase-107b railings use the same PS and VS 3847be86 too (DEVELOPMENT 107b: "21 draws of VS 3847be86"), so a
+  VS-only filter cannot separate them -- with `pole_aa = 1` far railings also get the pole-mode dither.
+- **Pixel-reader twin** (109a): `PrOnDrawBegin` AddRefs the game's PS before the swap, `PrOnDrawEnd` binds exactly that one back and
+  releases it. `g_prPsStale` (set by ClearState / ExecuteCommandList / SwapDeviceContextState on the game context and by a context
+  reset, cleared by the game's PSSetShader or a resync) stops a swap while `g_lodPsCur` may not be the bound PS. `PrOnDeviceReset`
+  (game device change) releases every twin + the grave.
+- **SaveSettings**: `kIniMaxKeys` 96 -> 128 (87 keys in use); `add()` is bounds-checked (refuses + one LogErr).
+- **Cut-out mips loader back-pressure** (107a): a TOTAL budget of 100 ms of waiting per second over all textures / loader threads
+  (reserved before each wait); "not waited (budget spent)" counted in the level-4 cut-out stats line.
+- **CPU profiler**: a thread's worst-frame breakdown is cleared with its window maxima, and not printed for a window without own
+  frames (no stale worst frame). Stale comments fixed (`g_cPoleGate` order = SolidDitherOk's why, the replay kinds 1..8 -> 2..5).
+- **Not done**: the optional census slow-path cut (a logged + captured + sampled pair still runs the slow path for its counters;
+  no cheap test). The 109d pole design and `pixel_reader.h` are unchanged.
+- **Tests (local)**: drawid_harness 160316 / 160316 (plain), 160362 / 160362 (did_shadow + verify), 160362 / 160362 (+ the PS / OM
+  bank); `15 0.1 mut109` FAILS as it must (4151 / 4152); settings_roundtrip 105619 (census defaults 0, ShadowLockUsable gates);
+  every other CI test passes. **Not verified in game**: the census RT2 tint, the shadow-lock gate, the pole replay band, the
+  twin AddRef / stale path, the loader budget.
+
+### Phase 110: the census in the menu (live) + its part of the double-Insert bug report
+
+- **Why.** The user's flow: open the Delete menu, switch the census on, drive; anything the mod does not handle yet shows in a
+  colour; press Insert twice on it; that ONE capture must hold everything needed to fix the shader later (like a RenderDoc
+  capture) -- no ini editing, no extra keys.
+- **Menu row "Show unfixed shaders"** (`MR_CENSUS`, group **Bug report**, between Keep captures and Capture now; both modes).
+  Off / on, Left = off, Right = on, LIVE (no restart). Keys column = `key_census_view` (`Ctrl+Shift+F5`), the same switch
+  (`CensusToggleView` -> `CensusSetLive`); the Hotkeys page line is now called "Show unfixed shaders" too. HIDDEN (never greyed)
+  when it cannot work: `CensusUsable()` = `CensusStart` ran (the CreatePixelShader + PSSetShader hooks are in) and the game's device
+  never changed. Cost column "off" while off. The 10 s colour legend in the status box shows at every switch-on.
+- **`census` in dlaa.ini = the row** (default 0). 1 = on from the game's start (and every shader's bytecode is kept from the first
+  one, `g_codeAll`). **Save** writes `census` (the row's state), **Reset** removes it and switches the census off live.
+  `census_dump` / `census_max_mb` stay startup-only ini keys (Save / Reset keep them).
+- **Why it was startup-only, and what changed** (`src/census_run.h`):
+  1. `CensusNotePs` / `CensusNoteVs` ran only with `census = 1`: a later switch-on knew no shader created before (most are made
+     at load). Now EVERY created shader is classified at Create*Shader (`CensusRun::Note`: checksum read from the DXBC header,
+     `ScanPs`, water_ps rule, pixel-reader twin check for pixel-reader shapes only, wire / solid kind) -- measured offline over the
+     91 local game shaders: **3.4 us per distinct bytecode** (census_test prints it), once per bytecode on the game's loader thread.
+  2. The bytecode copy (for the dumps) is now capped while the census was never on: every VS / plain PS below **24 MB**
+     (`kCodeCapIdle`), an interesting PS (a structural kind / a wire or solid PS) always (up to the old 96 MB); once the census is
+     on (or `census = 1`) every new bytecode is kept (96 MB). A dump of a shader that was not kept says so in draw.txt.
+  3. `g_censusOn` was set once by `CensusStart`. Now `CensusStart` only makes it ready (`g_censusReady`) and switches it on when
+     `census = 1`; `CensusSetLive` sets `g_censusCfg` / `g_censusOn` / the view together. View and census are one switch now (the
+     phase-108 "census on, view off" state is gone: off = nothing collected, nothing tinted -- the 109r rule holds).
+  4. Off after on: `CensusOnPresent` still drains what is in flight (grabs, a picture, a capture's census part: `Draining()`) and
+     writes no census file; the pairs found stay for the next switch-on.
+- **Normal-play cost with the row off** (estimated from the code, not measured in game): per DrawIndexed / DrawIndexedInstanced
+  the existing `CensusGate` flag test (`g_censusOn` first: one load + branch, as since phase 108); per Present one flag + four
+  empty-container checks; per created shader ~3.4 us (once per distinct bytecode, loader thread) + one SRW lock + a map insert; per
+  CreateInputLayout one short text (~1-2 us). Memory: one `ShInfo` (~150 B) per distinct bytecode, bytecode up to 24 MB (+ the
+  interesting PSs), the layout texts (a few hundred B each, at most 16384), the existing static tables (~0.7 MB). No draw-time state
+  read, no query, no tint while off.
+- **New hook: `CreateInputLayout`** (device vtable 11, `hkCreateInputLayout`, WITH_DLAA only): the layout's element list
+  (semantic, format, slot, offset, per vertex / instance, step) as text per layout object (`CensusNoteLayout`, an SRW-locked map,
+  16384 max) -- D3D11 cannot read a layout's elements back from the object; draw.txt prints it for the bound layout.
+- **The double Insert with the view ON** (`CaptureRequest` -> `CensusOnCapture`; also the Capture now row). View OFF: nothing
+  changes (exactly as before). ON:
+  1. The capture's folder name is fixed AT THE KEY (`Cap::g_nextSub`, `shimmer_<date>_<time>\`; `SelfTestStep` uses it) so the
+     census can write into it from the next frame on: `<capture>\census\`.
+  2. A census **MARK** (as Ctrl+Shift+F6; `MarkNow`) whose picture is `census\tinted.png` = the frame right after the key with
+     every suspect tinted.
+  3. The **armed frames** = the 3 frames after the key (`kCapArmFrames`): every suspect pair drawn there, at its FIRST draw
+     (its state bound; `CapFirstDraw`), gets `census\<vs8>_<ps8>\` -- `CapDecide`: a FULL dump (`DumpPair`: `vs.dxbc` / `ps.dxbc`
+     + `vs.txt` / `ps.txt` = D3DDisassemble, `tex_tN.dds` for every declared PS t-slot, `ps_cb0..7.bin` / `vs_cb0..7.bin` = the
+     bound D3D11.1 windows, `draw.txt`), or a LINK when the pair was fully dumped earlier this session and that folder still exists
+     (`draw.txt` with the state at this draw + the earlier folder; a capture_keep-deleted folder = dumped again), or TEXT ONLY past
+     the budget (48 full dumps per capture, `census_max_mb` for all census dumps of the session). An occlusion query around EVERY
+     draw of a suspect pair in the armed frames = its coverage (pixels, both eyes in VR); the query ring is 512 now.
+  4. `draw.txt` (every dump, also the census_dump ones now): the census entry, **WHY** it is a suspect (`Census::WhyText`, one line
+     per suspect kind with the facts), the state AT THIS DRAW: blend / depth-stencil / rasterizer / topology, every declared PS
+     t-slot (format, size, mips, role) + samplers, then `DrawText`: the draw call with all its arguments, pass flags + the overscan
+     shift, viewports, scissors, RT0..7 + the depth target (view + resource), the input layout elements, vertex buffers (stride,
+     offset, size), the index buffer, VS textures / samplers, every PS / VS constant buffer b0..b13 (window + size). Geometry
+     contents are NOT saved (said in the file).
+  5. Textures refused only because the staging in flight is full (192 MB) are grabbed at a LATER draw of the pair within 90
+     Presents (`CapLateTextures`; noted per slot in index.txt: it can be another mesh's texture).
+  6. The capture's own frames are **untinted** (`TintHeld()` = `g_testRunning && g_testShimmer`): on_N / off_N show the real
+     picture. After its sets: one **picture.png** per pair with ONLY that pair tinted (kHiFrames Presents each, the biggest
+     coverage first, at most 16: `CapPictureOrder`); taken after the capture's frames, so a pair that left the screen shows nothing
+     (index.txt says when each was taken). None in present-layer mode or when the view was switched off.
+  7. Then `census\index.txt` (`CapIndexText`: the head explains every file; per pair the folder, VS / PS constants, suspect kinds,
+     draws + coverage in the armed frames, the action / link, the picture, WHY, the per-slot texture status) and
+     `census\dlaa_census.txt` (the whole census at that moment), written by the census writer AFTER every file job of the capture
+     (FIFO; stage 3 waits until every capture grab is mapped = queued).
+  8. `CaptureFinishTick` waits for `CensusCaptureBusy()` before the zip (hard stop: 3600 + 300 Presents after the key; a device
+     change ends it). `Cap::FinishJob` now packs the `census\` subtree too, entries `census/<pair>/<file>`; `BugReport::PackGroup`
+     puts every `census/` file into the **_main** zip (the one the player always attaches; more parts when big). README.txt in the
+     capture explains the folder.
+  9. The writer queue (256 jobs) is protected: `PumpGrabs` maps a grab only while fewer than 192 jobs wait (a capture makes
+     hundreds of grabs in one frame); the rest stays in flight for a later Present.
+- **Files.** `src/census.h` (`WhyText`, `CapAction` / `CapDecide`, `CapRank` / `CapPictureOrder`, `CapRow` / `CapIndexText`),
+  `src/census_run.h` (live switch, code caps, `DrawArgs` / `DrawText` / `ResText`, the layout table, `DumpPair` shared by both
+  dump paths, `CapRun` / `CapFirstDraw` / `CapLateTextures` / `CapTick`, `MarkNow`, the new entry points), `src/inject.cpp` (the
+  row, Save / Reset, the CreateInputLayout hook, the full draw arguments into `CensusRun::Before`, `CaptureRequest` /
+  `SelfTestStep` / `CaptureFinishTick` / `FinishJob`, README.txt text), `src/bug_report.h` (PackGroup), tests (below),
+  `tests/menu_shot.cpp` (the row + `tuning-menu-bug-report.png`), `lang/template.pot`, README / KEYS / dlaa.ini.sample.
+- **Tests (local).** census_test 223 checks (+ WhyText, CapDecide, CapPictureOrder, CapIndexText; the create-time cost
+  print); bug_report_test (+ census/ -> _main); settings_roundtrip 107906 checks from an empty folder (`CensusLiveRules`: hidden
+  + refused without the PS hooks, Right / Left / key live, the row follows the key, view off = no census part at the double
+  Insert, view on = armed frames n+1..n+3 + the folder inside the capture + a MARK with tinted.png + the zip waits (and stops at
+  the deadline) + a second capture is left alone, TintHeld, CaptureRequest names the folder at the key; `CensusRules`: census = 1
+  shows on, Save writes census 1 / 0 after Left / Right flat + VR, Reset removes it and keeps census_dump / census_max_mb);
+  drawid_harness 160316 / 160362 / 160362, cutout_mips 390, pixel_reader 320, water_ps, shadow_lock 68, sharpen_nis 62,
+  hotkey_scan 42, lod_scope 239, bug_report 100 and every other CI test pass; settings_check.py, feature_check_test.py (42), lang
+  extract --check + check pass; menu_shot writes the row (tuning-menu-bug-report.png). Release DLL CRC32 C4111F50, 5578240 bytes. Log formats: `cl /Zs /DDLAA_FMT_CHECK` on inject.cpp clean.
+- **Not verified (nothing in game yet):** switching on live mid-drive (do the pairs fill in, does the tint appear at once); the
+  census part of a real capture (folder layout, file count, the zip parts, the time it adds before the zip); the per-pair pictures
+  (tint alone, after the sets); `tinted.png` timing (the frame after the key); the CreateInputLayout hook in both games (and with
+  other overlays hooking the device); `DrawText` getters on the game context; the create-time cost and the idle bytecode size on a
+  real session (the level-4 census line now prints "bytecode kept .. MB (not kept N), input layouts N"); VR (both eyes'
+  coverage, the mirror-window pictures).
+
+### Phase 110b: census noise fix -- cut-out verdict per drawn texture, fixes count only while ON, cheaper tint
+
+The user's first real drive with the census on (ETS2 flat, Norway, 2026-11-15, `cutout_mips = 1`, `wire_widen = 0`, `pole_aa = 0`)
+tinted almost all vegetation, grass, bushes, trees, far forest and fences orange: 31 suspects, 16 of them cut-out pairs whose
+reason was "patched", "waiting for the first discard draw", "game mips keep coverage", "soft alpha", "coverage outside 2..60 %"
+or "worker queue full". The GPU-per-pass line went from mod 3.27 ms to 11.56 ms / forward 5 -> 12 ms with the view on.
+
+- **The bug.** `FirstSight` set `cover.cutReason` from the texture bound at the pair's first draw but never re-judged; the
+  verdict stayed the one made at the pair's creation (reason "not seen by the uploader" = suspect). The three later re-checks
+  re-judged only when the reason differed from the (never judged) first one, so a pair that read "patched" at first sight kept
+  its suspect verdict forever (even "no loss (game mips keep coverage)" pairs were listed). And one texture's reason was the
+  pair's reason, while a tree PS (a9d39be8, 438d1a63) draws hundreds of textures.
+- **The new cut-out rule (`census.h`: `CutClassOf`, `CutTrack`).** Each phase-77 decision is OK, WAIT or BAD:
+  - OK: patched (waiting for its discard draw), applied, no loss, **soft alpha**, **coverage over 60 %**, no texture bound.
+  - WAIT: analysis pending, **worker queue full** -- re-checked at later draws, never tinted, listed as known with the reason.
+  - BAD: cutout_mips = 0, not BC3, the shape rule, never seen by the uploader, and the new **coverage under 2 %** (`kCutSparse`:
+    `WhyOfReason` now splits phase 77's "coverage" by cov0).
+  A pair is a cut-out SUSPECT only while a BAD texture was DRAWN in the last `kCutWindow` = 300 Presents (`CutTrack` per pair:
+  per class the last reason, its Present and a count). Every checked draw notes its own texture (`CutReasonDraw`: view on =
+  every draw of a cut-out pair, view off = 1 in 8; a view-pointer memo answers for 30 Presents, then the phase-77 table is asked
+  again). The tint follows the DRAW: a cut-out pair's draw is orange only when ITS texture is BAD. Live: a texture the loader
+  patches later is OK at its next check (its tint stops within ~30 Presents); the pair verdict follows after the window (pairs
+  that left the screen are re-checked at Present every 30 Presents).
+- **Why soft alpha and coverage over 60 % are OK (evidence).** The capture `captures\census_2026-11-15\shimmer_20261115_104831\
+  census\` holds the alpha texture of every cut-out pair (DDS read back from the GPU, every mip). Measured coverage at the PSs'
+  discard cut (alpha < 0.049988, `lt ... l(0x3d4cc000)`) per mip, worst mip relative to mip 0, down to the 4 px mip:
+  soft alpha 07dfaa00_cfc52d43 / 0dfced74_180589ca / 9d73eba3_3c3197f0 (256x2048, cov 28 %, 27 % soft texels) 1.09;
+  0dfced74_a710b6a2 (512x256, 79 %) 1.02; 3847be86_2d7ed0e6 (63 %) 1.00; 9d2904cd / d87f5280_2d7ed0e6 (96-97 %) 1.01; coverage
+  over 60 % 07dfaa00_c55c787d / 4186dac5_b97c44a3 (69 %) 1.07, c8dddb32_438d1a63 (100 %) 1.00; no loss 5e03b1ca_41c3064e 1.05,
+  c2ec5608_a9d39be8 1.04. The game builds soft alpha mips with a box average, and an average only spreads alpha past a low cut;
+  a texture over 60 % is mostly solid. None loses coverage, so they count as "game mips OK", in line with the phase 77 / 107a /
+  109f analysis (soft alphas skipped on purpose). A sparse alpha under 2 % is the opposite case (1-texel lines that the game's
+  0.5-threshold mips drop) and stays a suspect. For comparison the not-yet-applied leaves keep 0.93 with the game's mips, and
+  the one queue-full texture (8fcd62e3_a9d39be8, 1024x1024, 29 %) keeps >= 0.93 down to 8x8 and 0.65 at 4x4: a mild loss in the
+  last mips only (it keeps the game's mips until the game uploads it again: a missed patch, not a census verdict problem).
+- **Fixes count only while ON (`Cover` switches, `ThinFixOn`).** thin: wire pairs and solid kinds A..G = wire_widen (its live
+  Alt+F12 state), kind D = wire_widen or pole_aa, kind H = pole_aa only (SolidOnDraw skips H), the game-widened power line =
+  power_line_fix; pixel-reader / water-like: the phase-97 rule = water_overscan_fix, the 109a twin = pixel_reader_fix, and
+  `jitter_overscan = 0` covers them (no off-by-one read). `FixMaskNow` at every Present: a switch re-judges every pair (one log
+  line). The why text says "its fix wire_widen is OFF". d87f5280_2d7ed0e6 (pole body, kind D) was "covered thin" in the user's
+  file although wire_widen and pole_aa were both 0; it is a thin suspect now.
+- **Replay of the user's 31 suspects (census_test, `Phase110b`)**: 16 remain -- 15 thin (2a9f326e_e19e0136 also unknown-VS) and
+  7fcd07d6_b67da69f unknown-VS; all 16 cut-out-only pairs are KNOWN (6 patched / applied, 2 no loss, 5 soft, 2 coverage over
+  60 %, 1 queue full = waiting). Note for phase 111: 4 of the thin pairs are cut-out pairs (0dfced74_180589ca 0.36 px/tri,
+  c8dddb32_438d1a63, 2f9ff4a3_438d1a63, d87f5280_2d7ed0e6 0.15); their occlusion pixels count only the samples that survive the
+  discard, so px per triangle under-reads them by the alpha coverage (28 % for 180589ca: ~1.3 px/tri rasterised).
+- **Tint cost.** The tint re-drew every draw of every suspect pair: 2.93 M re-draws in 6304 frames = 465 per frame, mostly
+  vegetation (sum of the pairs' average occlusion pixels per draw 75.9 k). The user's file under the new rule: 154 draws per
+  frame (33 %), ~29 % of the triangles and ~4 % of the pixels (the remaining suspects are thin). The per-class GPU numbers are
+  bind-to-bind spans with GPU waiting time (post fell 3.8 -> 0.1 ms while forward rose 5 -> 12 ms; the scene span rose only
+  12.4 -> 13.4 ms), so the real tint cost was nearer 1 ms than 8 ms; expected after 110b: well under 0.5 ms (not measured in game
+  yet). New: the periodic census line prints the tint GPU time, sampled (one frame in 120: up to 256 tint re-draws bracketed by
+  timestamp pairs inside a disjoint query, scaled by re-draws / timed; an upper-bound estimate), tint re-draws per Present, a
+  safety cap of 4000 re-draws per Present (counted when it bites), cut-out texture checks + memo share and the waiting cut-out
+  pairs. The occlusion queries stay at <= 8 per Present (32 samples per suspect pair, 8 per thin candidate).
+- **Also.** `HeadText`'s buffer 1024 -> 4096 bytes (the KINDS line of the 2026-11-15 file was cut: "...with a VS outsid");
+  the header names pole_aa, power_line_fix, pixel_reader_fix and the new rules; the per-pair entry prints "cut-out textures
+  (checked draws): OK n (last ...), waiting n, BAD n"; the KNOWN list prints the cut-out reason. `inject.cpp` `kWhyN` 8192 ->
+  65536 (a town streams 1500+ BC3 textures; at 8192 about one in six collided -> a false "not seen by the uploader" = BAD).
+- **Files.** `src/census.h`, `src/census_run.h`, `src/inject.cpp` (WhyOfReason + cov0, kWhyN), `tests/census_test.cpp`,
+  README "Finding flicker", this section. No menu string changed.
+- **Tests (local).** census_test 279 checks (+ `Phase110b`: reason classes, CutWorse, mixed textures per pair, the live window,
+  fixes off / on per kind, WhyText names the fix that is off, the Norway replay 31 -> 16); every CI test, settings_check.py,
+  feature_check_test.py, lang extract --check + check.
+- **Not verified (nothing in game yet):** the tint following each draw's texture (trees with mixed textures), the live un-tint
+  when a texture is patched, the sampled tint GPU figure, the cut-out check cost with the view on (the CPU slow-path figure).
+
+### Phase 111: the census suspects of the user's Norway capture triaged and fixed + the census in VR
+
+Source: the user's double-Insert census capture `captures\census_2026-11-15\shimmer_20261115_104831\` (ETS2 flat, Norway coast
+road, `wire_widen 0`, `pole_aa 0`, `cutout_mips 1`; taken with the phase-110 build: the tint was still the pre-110b one). The 110b
+replay left 16 real suspects. The user: "it flickered on and off, those are all things not added to the DLAA mod yet".
+
+#### 111a: triage (evidence, not guesses)
+
+Per pair: its `picture.png` (the pair alone tinted; the camera was nearly still, so the pictures line up with the capture frames),
+its textures (DDS read back), the PS disassembly, `draw.txt`. Flicker was measured on the 12 consecutive `rewind_*` frames (the real
+play stream before the key): a pixel whose luma repeats with the 8 jitter phases (frame i = frame i + 8) but changes inside a cycle
+is flicker the JITTER causes ("J" = within-cycle std minus the same-phase difference; the whole frame 0.035). Pair masks were eroded
+to separate a pair's interior from its edges against sky / grass.
+
+| pair | what it is (evidence) | flickers? | action |
+|---|---|---|---|
+| d87f5280_2d7ed0e6 | road delineator / pole BODY, 57 instances in 1 draw, 312 indices (pole texture) | **yes**: the far post's luma follows the jitter cycle 119-144 (period 8 exactly), J max 8.7 | already fixed by `pole_aa` (kind D) -- it is OFF in the user's ini |
+| 2a9f326e_e19e0136 | the posts' reflector / stripe BAND, same 57 instances (sign atlas t6); VS 2a9f326e was not in kind H's set | yes (same posts; cyan reflector dots in tinted.png) | VS added to pair A's VS set (OSGN byte-identical to 07dfaa00's) -> `pole_aa` covers it |
+| db9404ad_a761133a | forward re-light of that band (same instances; reads t10/t11/t13..15 at the pixel, writes RT0 without blending: the deferred colour + a headlight glint) | follows the band | known pair, covered while `pole_aa` is on |
+| 7fcd07d6_b67da69f | skinned mesh (BLENDINDICES) with the far-wire PS (kind A; red painted wood texture); 0 px in the capture (off screen) | unclear (never on screen) | VS added to pair A's VS set (OSGN byte-identical); `wire_widen` covers it; the phase-80 static gate keeps animated draws undithered |
+| 07dfaa00_2585159b | sign / road-furniture atlas (same t6 as e19e0136), 2 draws, 144..2664 indices, 0.08 px/tri; pair A's maths without the gloss | unclear (not located: ~42 px per draw, no picture) | **kind I**: new bit-exact port `PSSolidI` + GSolidA, `wire_widen` only |
+| 0dfced74_180589ca | roof ladders / snow guards (256x2048 lattice alpha, 28 % coverage, the orange dots along the green house's eaves) | slight at its edges only (eroded interior J 0.12) | not thin: the occlusion query counted only the 28 % that survive the discard (0.36 -> ~1.3 px/tri rasterised) -> the thin measure is now alpha-corrected (111c) |
+| 07dfaa00_c92c7c22 | far building facades on the hill (window / wall atlas) | no (interior J 0.03) | known pair (dense far mesh, no gaps) |
+| 9d73eba3_5396e5a9 | far industrial building / roof | no (0.03) | known pair |
+| 5ebed025_7c55acee | far town houses, instanced low-poly boxes (12..174 indices) | no (0.02) | known pair |
+| 97d9c72d_0a1ed38a | the window-light forward pass of those houses | no (0.02) | known pair |
+| 3c957c7c_18e8e355 | ground strips: the path on the bank, the kerb edge, the shore line (rock-grass texture) | not the strip: the flicker there is the grass blades over it | known pair |
+| 07dfaa00_ad165830 | grass-on-ground blend strips (grass albedo + BC4 noise mask; cyan on the shore / boathouse ground) | no | known pair |
+| 1ec77518_b8636556 | far AI / parked cars (car atlas + reflection cube, 2400..3700 indices) | no (only the building's window edges behind) | known pair |
+| 8ba7d8da_fd5e16e5 | far car glass / lamp overlay (additive forward, ~1 px per draw) | no measurable | known pair |
+| 2f9ff4a3_438d1a63 | far grass / hedge cards (4096x1024 grass alpha, ~7 px per draw) | no measurable | known pair |
+| c8dddb32_438d1a63 | flower clumps (instanced cards, alpha fully opaque) | no on the flower patch (white flower pixels d2 1.7 vs the post next to them 17) | known pair (judgment: the least certain entry) |
+
+What the capture shows really flickering with the jitter (J map): the **power lines** (game wires: `wire_widen`), the far **lamp
+posts** (ccd6b6d1 + b67da69f: `wire_widen`), the **delineator posts** (`pole_aa`), the skyline tree tops (far cut-out trees, outside
+the 16) and wind-blown grass. Almost all of it is ALREADY handled by the two opt-in fixes the user had off.
+
+#### 111b: the fixes (all opt-in, as before; no default changes)
+
+- `src/wire_widen.cpp` / `.h`: pair A's VS set + `kSolidVsA3` 2a9f326e and `kSolidVsA4` 7fcd07d6 (kinds A, C, G, H and I use that
+  set). Kind **I** (`kSolidI` = 9, `kSolidKinds` 9): PS 2585159b, `PSSolidI` (pair A without the gloss: `o1 = cb0[1]`), GSolidA,
+  replay kind 2. ShaderCache `kSolidPsI` (appended after `kCensusTintGbufPs`), CMake fxc validation + embedding, `EnsureSolid`
+  creates it, inject.cpp's first-draw log names it ("sign / road-furniture atlas").
+- Enable: `wire_widen = 1` (Alt+F12 live) for kinds A / I and 7fcd07d6; `pole_aa = 1` (row "Thin pole fix", Ctrl+Shift+F4) for the
+  delineator band (kind H with VS 2a9f326e) and the body (kind D).
+- Risk: kind H with 2a9f326e dithers every e19e0136 draw of that VS under `pole_aa` (road-sign faces drawn instanced through it too,
+  as already for 07dfaa00 since 109d). Kind I is a sign atlas: if far sign frames look fainter with `wire_widen`, that is the dither.
+
+#### 111c: the census
+
+- **Known pairs** (`census.h` `KnownPairs` / `KnownPairIndex`, `Cover::knownPair`): 11 entries by full VS + PS checksum, each with the
+  kinds it covers (thin only), the switch it needs (`kKnownFixNone`, or `kKnownFixPole` for the reflector re-light) and the reason
+  with the evidence (the file prints `known pair (phase 111): ...` under the KNOWN list; a pole one with `pole_aa` off says "its fix
+  pole_aa is OFF"). A known entry never covers a BAD cut-out.
+- **Alpha-corrected thin measure** (`Census::ThinPixels`): a sampled query of a cut-out pair records the coverage at the 0.05 cut of
+  the alpha texture drawn (`CutCovDraw`: the lowest over the discard slots), from phase 77's analysis: `CutoutMips::Plan::covCut`
+  (new: the share of decoded mip-0 texels >= the cut, also for soft alphas, over the decoded rows at an early stop), kept per texture
+  next to the reason (`Cutout::g_whyCov`, 0 = unknown; `CensusWhy(r, &cov)`). The thin rule then counts px / max(cov, 0.05). Unknown
+  coverage (cutout_mips = 0, not BC3, not analysed yet) = as measured. The file says how many samples were corrected.
+- **Replay** (`census_test` `Phase111`): the 31 suspects of the 2026-11-15 file -> with the user's ini (wire_widen 0, pole_aa 0)
+  **4 remain**: 2a9f326e_e19e0136, d87f5280_2d7ed0e6, db9404ad_a761133a (pole_aa off) and 07dfaa00_2585159b (wire_widen off); with
+  `wire_widen = 1` + `pole_aa = 1`: **0**.
+
+#### 111d: the census in VR (audit + fixes)
+
+Checked in the code (no VR session): what holds already, what was wrong.
+- **Menu row / key**: "Show unfixed shaders" hides only when `CensusUsable()` is false (no PS hooks / device change), in both modes;
+  the VR panel (quad layer or in the eye pictures) builds the same rows; `key_census_view` is read in the shared debug-key block.
+  settings_roundtrip: the row is SHOWN in VR with `menu_show_all` off and the key switches it on / off in flat and VR.
+- **Legend**: the status box (`CaptureStatus` -> `CensusStatus`) is drawn into each eye picture in VR (`drawCapStatus`, also with
+  the quad layer, which carries only the panel and fps box) -- the 10 s legend shows in the headset.
+- **Tint in both eyes** -- FIXED: the safety cap (`kTintMaxPerFrame` 4000) counted per Present, so in VR a cap that bit in the second
+  eye pass tinted the first eye only (binocular flicker). Now counted per WORLD PASS (`g_passSeq`), VR `kTintMaxPerFrame / 2` per eye
+  pass: the same draws are tinted in both eyes. The tint decision itself is per draw from per-pair state (identical in both passes);
+  G-buffer RT2 / forward RT0 as before.
+- **Thin measure per eye**: each occlusion query brackets ONE draw in ONE eye pass at that eye's render size, so px per triangle is
+  per eye (not doubled / halved). The 8 queries per Present are shared by both eyes (the cap is per frame). FIXED: thin samples are
+  no longer taken in a MIRROR pass (a mirror view is smaller: the same mesh read thinner there; flat too).
+- **Counting**: frames seen = Presents; draws per frame count both eyes in VR (now said in the file). New per pair: the world passes
+  it was drawn in (1st / 2nd / later; VR = the two eyes) printed as "world passes drawn in".
+- **Capture (double Insert)**: the armed frames are Presents, so both eye passes of each are armed; coverage sums both eyes (as
+  documented). `draw.txt` now says the VR world pass and its eye (`VrsDecideEye`: certain sources only, "eye 0 = RIGHT eye", else "eye
+  not certain"). Pictures -- FIXED: in VR they were the desktop mirror window (back buffer, the runtime's choice of eye) and none at
+  all in present-layer mode; now a due picture is taken at **eye 0's blit** (the RIGHT eye's picture after DLAA, before the status box
+  / panel are drawn on it: `CensusOnEyeBlit` -> `PicAtEyeBlit`), the back buffer only when that eye texture cannot be saved (format not
+  RGBA8 / BGRA8 / R10G10B10A2, MSAA or an array: one warning, then the old way) or no eye blit served it within 3 Presents.
+  index.txt names the source ("Pictures ... are taken from: VR eye 0 (the RIGHT eye) after DLAA, at its blit").
+- **Per-eye rules**: cut-out reasons are per texture (the same in both eyes); the 109a twin is bound only when viewport 0 starts at 0,0
+  -- the VR eye passes render into their own eye targets (the eye map is keyed by the RT), so they start at 0,0; the census still
+  counts a PS with a twin as covered when a draw skipped it (no per-draw record). The overscan rule (`jitter_overscan`) is global.
+- **Cost (VR, view on)**: per draw as flat x two eye passes; the queries (8 / Present) and the tint cap (now 2000 per eye pass = 4000
+  per Present) stay per frame. Not measured in the headset.
+
+#### Phase 111 tests
+
+See the report numbers below; harness S107: the two VS OSGNs vs 07dfaa00 (field compare + byte for byte), PS 2585159b's input = pair
+A's, `PSSolidI` vs the game bytecode bit-exact on 4 targets, GSolidA + PSSolidI 0.06 px ribbon, kind -> GS / replay mapping incl. I
+(game blobs `captures\vs_2a9f326e.dxbc`, `vs_7fcd07d6.dxbc`, `ps_2585159b.dxbc`, copied from the census dump). census_test
+`Phase111`: ThinPixels, the 180589ca correction, the known list (lookup, a changed checksum is not known, switch, why text, never a bad
+cut-out), the new set entries / kind I by checksum, the real capture's checksums (local), the Norway replay both ways.
+settings_roundtrip `CensusLiveRules`: the VR / flat row + key, the tint cap per pass, the VR picture queue rule.
+
+#### Not verified (needs the game)
+
+- Flat: with `pole_aa = 1` the delineator posts (body + reflector band) stop blinking; with `wire_widen = 1` the far lamp posts and
+  power lines; kind I's look (sign frames); the census file listing the known pairs; the alpha-corrected thin samples count.
+- VR (headset): the row + Delete key + legend in the headset; the tint identical in both eyes (no eye-only colour); tinted.png /
+  picture.png from the right eye (format accepted? else the log warning); draw.txt's eye line; the cost line with the view on.
+
+### Phase 112: one "Picture fixes" preset row (Standard / Off / Custom) + key_picture_fixes
+
+The user (2026-11-15): "There are so many fixes and menu items now -- thin pole fix, wire widening, this fix, that fix. It's getting
+overwhelming. There needs to be a standard: this improves this; if you have issues, disable it. Good for live comparison in game."
+So every fix the mod adds against an artefact (flicker, ghost / trail, shimmer) is ONE preset, built like the phase 105b Sharpen
+preset (`src/sharp_preset.h`): `src/pic_fixes.h` (pure logic, both builds) + inject.cpp (row, key, LoadConfig / Save / Reset).
+
+- **Standard** (default) = every fix at its TESTED default = exactly the code defaults of phase 111 (no behaviour change for a player
+  who never touched a fix). **Off** = every fix in the set off, LIVE, for comparison (DLAA / DLSS itself stays on: that is Mode).
+  **Custom** = the player's own value per fix; the fix rows are shown only then (as Halo limit / Sharpen colour under Sharpen preset).
+- ONE table, `PicFixes::kDefs` (key, Standard value, Off value, range, live). A fix whose Standard value equals its Off value is not
+  in Standard yet (an opt-in); moving it in = its `standard` value there, one line. `pole_aa` and `wire_widen` move into Standard
+  after the user's flat + VR test (comment in the table); `cutout_mips` too once decided (its default has been 0 since the 77b car
+  sparkles).
+- A hand change of ONE fix -- its row, its own hotkey (`key_shadow_lock`, `key_pole_aa`, `key_mv_dilate`, `key_mv_conservative`,
+  `key_wire_widen`) or a fix line in dlaa.ini that differs from Standard -- makes the preset Custom (`PicFixTouched`: the values shown
+  before the change become the Custom set). With the menu closed (a hotkey) a 3 s note in the status box (the bug report's box,
+  flat and VR) says "Picture fixes: Custom / <row> changed".
+- **key_picture_fixes** (default `Ctrl+Shift+F7`; free: Ctrl+Shift+F1..F6 are taken, F7..F12 were not; not Home / Delete / Insert /
+  End / PageUp / PageDown): Standard <-> Off; from Custom -> Off and the next press back to the SAME Custom values (`g_picBack`,
+  `g_picCustom`). Beeps: Standard one high, Custom two high, Off one low. A 3 s note "Picture fixes: Off / Ctrl+Shift+F7: back to
+  Standard". On the Hotkeys page ("Picture fixes Standard / Off").
+- **The row** "Picture fixes" is the first row of the Picture group (`MR_PICFIX`); Left / Right: Standard -> Off -> Custom -> Standard.
+  The fix rows follow it (`MR_BIAS` .. `MR_FXCUTOUT`; the three wire rows moved here from Compare and test), each with its own hide
+  rule on top of "Custom only" (phase 87: hidden, never grey). The row (and so its fix rows) hides while the main scene runs no
+  DLAA, like the other DLAA quality rows: every fix acts on the jittered / DLAA'd picture; the key still works. `kMaxRows` 96 -> 112
+  (104 rows).
+- **dlaa.ini** `picture_fixes = standard | off | custom`. LOAD (`PicFixes::Resolve`): no key -> standard when every fix value in the
+  file (the default where a key is absent) is the Standard one, else custom; `standard` with a differing fix key -> custom (the value
+  kept, a WARN); `off` -> Off, and the file's values are the set the key returns to (standard when they match it, else custom).
+  SAVE writes `picture_fixes` and the 13 fix keys only for a Custom set (Custom, or Off over Custom); Standard / Off over Standard
+  REMOVE them (an empty value), so a later change of a Standard value reaches the player. RESET = Standard (all 14 keys removed).
+  LoadConfig first sets every fix to its Standard value (a key absent = Standard), then applies the preset (`PicFixApplyRaw`).
+- **Live switching** (`PicFixApplyLive`, one log line `picture fixes now <preset> (<via>, Present #N): key=value ...` that
+  `scripts/feature_check.py` takes as a live change): each switch through the path its own row / key uses -- the shadow lock via
+  `SetShadowLock` (from the next slice set), Wire fix: motion via `SetMvDilate` (the DLAA features recreate: a short history reset,
+  like a model change), the bias strength / outside AA into SceneDlaa; the rest are the per-draw / per-pass switches their render
+  code already read every draw (verified per fix below).
+- **Startup-only parts**: `cutout_mips` patches the game's textures when they load (77b: once drawn see-through), so it cannot be
+  undone live: the row / preset change the SETTING (`g_cutoutCfg`), the running value `g_cutoutMips` is fixed at the start; the row
+  reads "on (next start)" / "off (next start)" until then. `pixel_reader_fix`'s twins are made when the game creates its shaders:
+  they are built at the start unless the start is Custom with the fix off (`g_prFixBuild`); its draws gate on the live switch, so
+  Off / Standard work live; on after such a start = the next start (the row reads "on (next start)", the live log line says so).
+- **Census** (phases 108-111): `CensusRun::FixMaskNow` reads the live switches, so with Off the pairs those fixes cover are suspects
+  again (re-judged at the next Present) -- correct and useful for "is this flicker one of ours?". The reader bit also needs the twins
+  (`g_prFixCfg && g_prFixBuild`).
+
+#### The inventory (every per-fix key / row / hotkey of phases 49-111), and the decision per key
+
+In the preset (`PicFixes::kDefs` order = the fix rows' order):
+
+| fix (menu row) | dlaa.ini key | phase | in Standard | Standard | Off | live | row hidden also when |
+|---|---|---|---|---|---|---|---|
+| Light trail fix | `dlss_bias_mask` | 49 | yes | 100 | 0 | yes (SceneDlaa bias strength) | the main scene runs no DLAA |
+| Steady own shadow | `shadow_lock` (+ `key_shadow_lock`) | 103 / 105a | yes | 1 | 0 | yes (next slice set) | no draw hooks / did_shadow / NO_OVERWRITE map, no DLAA |
+| Thin pole fix | `pole_aa` (+ `key_pole_aa`) | 109d | **no** (test feature) | 0 | 0 | yes | no PS hooks / solid shaders dead, no DLAA |
+| Wire fix: motion | `dlaa_mv_dilate` (+ `key_mv_dilate`) | 60 | yes | 1 | 0 | yes (DLAA features recreated) | - |
+| Wire fix: depth | `mv_fwd_conservative` (+ `key_mv_conservative`) | 60 | yes | 1 | 0 | yes | the Glass and fence fix is off |
+| Thicker wires (test) | `wire_widen` (+ `key_wire_widen`) | 61-68, 107b | **no** (experimental) | 0 | 0 | yes | - |
+| Power line fix (new row) | `power_line_fix` | 109b | yes | 1 | 0 | yes (per forward draw) | the Glass and fence fix is off |
+| Lit edge fix (new row) | `pixel_reader_fix` | 109a | yes | 1 | 0 | yes while its twins exist | `jitter_overscan` = 0 |
+| Lit surface fix (new row) | `light_redraw_jitter` | 55 | yes | 1 | 0 | yes (per lighting bind / draw) | - |
+| Roof shadow fix (new row) | `light_fs_jitter` | 78 | yes | 1 | 0 | yes (per full-screen light draw) | - |
+| Water block fix (new row) | `water_overscan_fix` | 97 | yes | 1 | 0 | yes (per water draw; the classifier always runs) | `jitter_overscan` = 0 |
+| Outside the DLAA area (new row, VR) | `outside_aa` (0 / 1 / 2) | 81 | yes | 2 | 0 | yes (per Run; shaders made lazily) | flat, or DLAA area 100 % |
+| Far fence and leaf fix (new row) | `cutout_mips` | 77 / 107a | **no** (code default 0) | 0 | 0 | **no: next start** | - |
+
+NOT in the preset (core settings, sub-knobs, tools), with the reason:
+
+| key / row | why it stays outside |
+|---|---|
+| `mode`, `dlss_upscale`, `dlss_preset` (Mode, DLAA model) | the main DLAA / DLSS itself -- Off is about the extra fixes, not Mode |
+| `perf_profile` (Quality preset) and what it owns: `mv_fwd_depth` (Glass and fence fix, `Ctrl+F3`), `mirror_dlaa` / `mirror_*_mode` / `mirror_mv` (Smooth mirrors), `dlaa_area` defaults | performance tiers: `low` switches the see-through depth off, the VR budget can auto-off it; one owner per key. The Glass and fence fix is the base the wire depth / power line fixes ride on (their rows hide without it) |
+| `mv_objects` (Track moving parts, `Alt+F5`), `mirror_turns` | core motion / performance, not an artefact fix |
+| `sharpness`, `sharp_radius`, `sharpen_type`, `sharp_halo`, `sharp_luma`, `sharp_preset` | a look, with its own preset (phase 105b) |
+| `tex_lod_bias`, `tex_lod_bias_cutout`, `tex_aniso` (+ scopes) | sharpness knobs (negative bias = more shimmer, never a default) |
+| `motion_blur`, `motion_blur_show` | an effect, not a fix |
+| `dlaa_pre_tonemap` (Run DLAA earlier, `Alt+F7`) | where DLAA runs in the pipeline (a compare switch of its own, flat, ~1 s rebuild); a candidate for a later phase |
+| `game_taa*` | the game's TAA compare tool |
+| `jitter_enabled` / `jitter_phases` / `jitter_sign_*` / `jitter_overscan` | the jitter itself (water / pixel-reader fixes are the corrections of `jitter_overscan`) |
+| `wire_min_px`, `wire_solid_min_share`, `wire_solid_static_only` (phase 80 dither gate), `pole_min_px`, `shadow_lock_phase`, `shadow_lock_diag`, `cutout_max_dim` | sub-knobs of a fix (startup only, ini) |
+| the `mv_*` internals (draw-id twin / parent / consensus / instanced / replay / area clip ...), `did_shadow*` | motion-vector machinery and performance, not player-facing |
+| `preview_*` | the profile / truck-preview screen and its debug switches |
+| `census`, `census_dump`, `census_max_mb` | the tool that finds unfixed flicker (its "fix counts only while on" follows the preset) |
+| VRS / turbo / fps / CPU / panel / log / bug report keys | settings, not picture fixes |
+| phase 98 / 109c water at full VRS rate, phase 102 / 106 plate motion | no switch (always on inside VRS / the motion vectors) |
+| `steady_edge*` (phase 89) | removed in phase 89 (old lines ignored) |
+
+**The user's dlaa.ini (read only, 2026-11-15)**: both games' `bin\win_x64\dlaa.ini` set `dlss_bias_mask = 100`, `shadow_lock = 1`, `wire_widen = 0`, ETS2 also
+`pole_aa = 0` -- all Standard -- and `cutout_mips = 1`, which is not in Standard: both resolve to **Custom** (fix rows shown,
+everything as before; `settings_roundtrip_test.exe --rows-at <ini>` prints it). If `cutout_mips` moves into Standard both become
+Standard.
+
+#### Phase 112 tests
+
+settings_roundtrip `PicFixRules` (in-process + children): the table (Standard = the phase 111 defaults, Off = all 0, the three
+opt-ins), parsing / the row cycle / the key cycle / the load rule (8 cases), Off LIVE (every switch, SceneDlaa bias / outside AA,
+the shadow lock's pending state) and the census fix mask Standard vs Off, every one of the 13 fix rows from Standard and from Off
+-> Custom with exactly that fix changed, the fixes' own hotkey functions -> Custom (+ the note), the key Standard <-> Off and Custom
+-> Off -> the SAME Custom values, the row back to the kept Custom set, the default key free (no two default bindings equal) and on
+the Hotkeys page; dlaa.ini starts (8 cases flat + VR incl. the user's fix keys -> Custom, `off` over a custom set), Save (Standard
+removes all fix keys, Custom writes all, Off over Custom keeps them, the key at an Off start brings the Custom set back), Reset
+(removes picture_fixes + every fix key -> Standard), "on (next start)" for cutout_mips. GateCheck (every press of every row, four
+rounds): the row names the preset, Standard / Off = exactly their values, every fix row hidden outside Custom and its own hide rule,
+each new row = its switch. MenuRules: preset row always shown, fix rows only with Custom, flat and VR. The generic round trip covers
+the 8 new rows (a "(next start)" suffix is the same choice across the restart). feature_check_test `TestPictureFixes`.
+
+### Phase 112b: a clear census legend (what each colour means, how to capture it)
+
+User screenshot 2026-11-15: the census view's two-line status box read "Census view: magenta pixel-reader, ora..." (title cut
+off) + "cyan thin, blue water-like, yellow unknown VS" -- jargon, cut, and no word on what to do. Now:
+
+- **Its own overlay box** (`TuningMenu::DrawLegend`, `src/menu.cpp`; text in `src/census_legend.h` `CensusLegendFill`, shared
+  with `tests/menu_shot.cpp`): title "Unfixed shaders are coloured", one line per tint kind -- a swatch and the colour word in
+  the tint table's own RGB (`Census::KindColour` x 255: magenta 255,0,255 / orange 255,115,0 / cyan 0,255,255 / blue 26,77,255 /
+  yellow 255,255,0), then the plain meaning (lit edges read the wrong pixel / see-through leaves and fences that fade or sparkle /
+  very thin objects smaller than a pixel / water the mod does not handle yet / a known object drawn in a new way) -- and two
+  footer lines with the player's OWN bindings (`KeyNameUi(KA_SHIMMER_CAP)` "Press <key> twice to save it for a fix",
+  `KeyNameUi(KA_CENSUS_VIEW)` "Colours off: <key>"; unbound = the menu rows' names). Dark background at 75 %, the panel's face.
+- **Nothing cut**: the box width is GDI-measured from the very glyphs it draws at the build scale (`LegendMeasure`), the height
+  follows the lines; `DrawLegend` only ever shrinks it to fit `maxW` / `maxH` and keeps it inside the target. menu_shot renders
+  it at 1080p (1.25) and 4K (2.5) scale and fails if it had to shrink.
+- **When**: 15 s (`kLegendSecs`, was 10) after every switch-on (row or key: `CensusSetLive`), and again for as long as the menu
+  is open on the row "Show unfixed shaders" (`CensusLegendNow`). Not while a bug report capture runs / writes (the status box has
+  the word then; `CensusOnCapture` also ends the 15 s). The mark note ("MARK n saved", 4 s) stays in the status box, with its
+  OWN timer now (`g_markNoteUntil`; one timer for both used to cut the legend short).
+- **Where**: flat (and the VR desktop mirror) top centre under the status box; with the menu open, beside the panel (right, else
+  below, else left; no room = top centre). VR: drawn into each eye picture with the status box's stereo shift -- above the status
+  box / 16 % above the optical centre, with the menu open above (else under) the panel's eye-picture rectangle (an approximation
+  for the quad-layer panel: the quad covers the eye picture, so the legend must not sit under it).
+- **Fix found on the way**: `MenuDrawsIntoEyes` (phase 57) did not know the bug report status box (phase 89e). With the menu
+  closed (or a quad) and the fps box off (or a quad) nothing armed the eye picture, so the status box never showed in VR in that
+  setup. `g_capStatusOn` (status OR legend) now arms it.
+- Cost: one GDI build per text / scale change (two slots: eyes, flat), then one textured quad per eye while shown.
+
+Tests: settings_roundtrip (shown on key / row switch-on, tint-table colours, footer = the bindings incl. unbound, the mark note
+does not cut it, gone after its time, back while the menu is on the row, not on another row, not while a capture runs, off with
+the view); menu_shot `census-legend.png`, `census-legend-4k.png`, `census-legend-unbound.png`.
+
+### Phase 112c: presets everywhere -- Picture preset, a tidy sharpen block, Foveated / Panel presets
+
+The user, 2026-11-15: "Picture fixes 'Standard' make 'Recommended'. Picture fixes = Picture preset. Glass and fence fix is still
+visible and should be in Picture preset Custom. Sharpen strength and type under the preset. Try and make as many preset areas as
+possible. And if there's something for sharpen, keep that neat and tidy."
+
+- **Picture preset** (was Picture fixes): dlaa.ini `picture_preset = recommended | off | custom`; the old key `picture_fixes` and
+  the old value `standard` are still read (the new key wins when both are in the file); Save writes `picture_preset` and removes
+  `picture_fixes`; `key_picture_preset` (old `key_picture_fixes` read as an alias; the Hotkeys page removes the old line when it
+  writes the new one). Notes / log: "Picture preset: Recommended / Off / Custom".
+- **Glass and fence fix** (`mv_fwd_depth`) joined the set (`PicFixes::kFwd`, row `MR_FWD` moved right under the preset, Custom
+  only). Its Recommended value is the active Quality preset's (`PicFixes::g_stdFwd`, set by `ApplyProfile` and before the load
+  rule: high / medium 1, low 0 -- exactly what `perf_profile` gave it before). Ownership: Custom = `g_profExplicit[PK_FWD_DEPTH]`
+  (Save writes the line, a profile change leaves it); Recommended = not explicit (the profile sets it, Save removes the line);
+  Off = 0 and `ApplyProfile` skips the key while Off. The VR budget auto-off is not a hand change (`PicFixRead` ignores it).
+  Ctrl+F3 / the row = a hand change -> Custom.
+- **Far fence and leaf fix** (`cutout_mips`) is in Recommended (code default 1): the user confirmed far fences OK 2026-11-01;
+  the risk is loader stutter on streaming bursts, which the 109r wait budget caps; it still needs a restart to change, and Off
+  switches the setting off (from the next start).
+- **Sharpen block**: Sharpen preset first (`off | soft | balanced | crisp | extra | custom`, Off added), then Sharpen strength,
+  Sharpen type, Sharpness size, Halo limit, Sharpen colour -- those five shown ONLY with Custom. Every named preset now fully
+  defines the sharpening: RCAS at 1.5 px (the code defaults; the halo / colour values were tuned on RCAS, NIS has no size / halo
+  / colour knob -- pick Custom for NIS); Off = strength 0 only. A hand change of any of the five (row or Shift+F7..F10) -> Custom.
+  Load rule as 105b plus `sharpen_type` / `sharp_radius` (have bits); no key + strength 0 = Off.
+- **Picture group order**: Picture preset (+ Glass and fence fix and the 13 other fix rows with Custom), Sharpen preset (+ its
+  five rows with Custom), Texture sharpness, Leaves and fences sharpness, DLAA area. Texture sharpness got no preset: it is one
+  value (0 = off by default) and Leaves and fences already follows it ("same") and hides at 0.
+- **Group presets** (`src/group_preset.h`, Recommended / Custom, one constexpr table each, the 105/112 load / Save / Custom rules):
+  - Performance (VR): **Foveated preset** (`vrs_preset`): `vrs_inner` / `vrs_outer` / `vrs_passes` / `vrs_strength` = 55 / 80 / 0 / 0;
+    Custom shows Foveated size, Foveated: lighting too, Foveated strength. Not in it: `vrs` (the group's main switch) and `vrs_eye`
+    (a headset capability the player must see).
+  - Menu panel (VR): **Panel preset** (`panel_preset`): `menu_vr_depth` / `menu_vr_dist` / `menu_vr_lock_dist` / `menu_vr_face` =
+    12 / 100 / 80 / 1; Custom shows Panel depth and Panel faces you. Position / size / lock stay visible (every player places it).
+  - No preset, and why: **Motion and mirrors** -- Track moving parts / Smooth mirrors / Mirrors take turns are already preset by
+    the Quality preset (perf_profile); a second preset would fight it. **Frame rate** -- CPU tuning, AMD cache cores, FPS caps,
+    Reflex are single independent hardware choices. **In-game UI** -- the values are the game's own config.cfg, the group already
+    has "Reset to config.cfg". **FPS counter** -- turn / tilt / rotate / distance / brightness / opacity are stored per vehicle
+    by the fps_profile lines (phase 51): a preset would be overwritten on every vehicle change. **Compare and test**, **Bug
+    report** -- switches / actions, nothing to preset.
+- The user's two dlaa.ini (read-only check 2026-11-15): Picture preset Recommended (cutout_mips 1, mv_fwd_depth 1 at
+  perf_profile high, the rest absent / default); Sharpen preset ETS2 Custom (`sharp_preset = custom`, sharpness 0.0), ATS Custom
+  (sharpness 0.6, no key); Foveated preset Custom in both (their own ring sizes / strength); Panel preset ETS2 Custom
+  (menu_vr_dist 300), ATS Recommended.
+
+Tests: settings_roundtrip `PresetRules` (sharpen load rule incl. type / size / Off, every built-in preset RCAS 1.5, hand changes
+of all five -> Custom), `PicFixRules` (Recommended table incl. cutout_mips 1 and g_stdFwd, old key / value aliases, new key wins,
+key alias, the Glass and fence fix against the Quality preset incl. Off through a profile change, user inis -> Recommended, Save
+writes picture_preset and removes picture_fixes), `GroupPresetRules` (tables = code defaults, load rule, the row keeps the Custom
+values, ini cases incl. the user's VRS / panel keys, Save / Reset), GateCheck (every row's hide rule); menu_shot
+`tuning-menu-picture(-custom).png`, `tuning-menu-vr-performance(-custom).png`, `tuning-menu-panel(-custom).png`.
+
+### Phase 112r: audit + performance fixes (phases 101-112c review)
+
+Confirmed audit findings and the perf pass that cutout_mips (default ON since 112c) made necessary: the render thread is CPU-bound
+in VR, so every per-draw cost that now reaches every player matters.
+
+**Bugs**
+1. **mv_fwd_depth explicit flag.** 112c set `g_profExplicit[PK_FWD_DEPTH] = (preset == Custom)` at load and on every preset switch,
+   so the user's `mv_fwd_depth = 1` + Recommended armed the VR budget auto-off, hid the request and Save dropped the line. New
+   `g_fwdAsked` (the ini line, Ctrl+F3, the Glass and fence fix row; cleared by LoadConfig / Reset): explicit = Custom || asked.
+   Save writes `mv_fwd_depth` whenever explicit (the live value; with Off the value of the set Off returns to). The guard is split
+   into `FwdGuardJudge` (testable) and its log text now says what "not set" means (not in dlaa.ini, not by the key / row, not
+   Custom). The batch log line names why the budget is not applied (asked vs Custom).
+2. **Census tint in a mirror G-buffer pass**: `t.hdr = !(g_gbufPass || g_mirGbuf)` (it tinted the mirror's RT0 with the HDR PS);
+   passMask bit 8 = mirror G-buffer; draw.txt says "mirror G-buffer" / "mirror forward".
+3. **PicFixTouched from Off**: a fix hotkey / row while Off replaced the kept Custom set with "all off + one fix". Now the change
+   goes on top of `Live(g_picBack, g_picCustom)` (the fix itself keeps the value the player saw; the caller changes it from there).
+4. `PicAtEyeBlit`: `if (!g_dev) return;`.
+5. **Device change while the census is off**: `CensusSetLive(true)` compares the game context's device with the census `g_dev`;
+   a mismatch sets `g_devBad` and refuses (no old-device tint / query / staging object is ever used).
+6. **Sharpen preset kept Custom set**: `g_sharpCustom` taken when the row leaves Custom, applied when it returns (load: the
+   file's values when they resolve to Custom). Session only (Save writes the values in use).
+7. **Capture that never starts**: `CensusCancelCapture` (SelfTestStep's refusals: device changed / no folder) and a
+   `kCapStartWait` = 120-Present timeout in the census Present (request still pending) cancel `g_cap` and clear `Cap::g_nextSub`;
+   capture stage 1 also waits while the request is pending (it used to run on and write a census folder for no capture).
+8. `CensusSetLive(false)` ends a Begun disjoint query and resets `g_ts.state`.
+9. Smaller: the "picture fixes now" line adds `mv_fwd_depth=` and "cut-out mips setting N" (no `=`: feature_check.py reads
+   key=value as a live change, and cutout_mips is startup only); DumpPair checks `Queue()` -> "not written (queue full)" in
+   index.txt + a warning; a kept Custom set that is only a copy of Recommended follows a Quality preset change (Off -> Custom
+   brought the old mv_fwd_depth); the sharp_preset warning lists `off`; `key_picture_preset` wins over `key_picture_fixes` in any
+   order (`g_picKeyNewSeen`); a busy phase-77 lock in the census per-draw check reuses the pair's last answer (both VR eyes tinted
+   alike).
+
+**Performance** (estimates from the code paths; NOT measured in game)
+- P1 `Cutout::OnDraw` -- was: while anything waited (the whole session: patched textures never drawn with a discard stay
+  pending) every discard draw of every pass incl. the shadow cascades did `PSGetShaderResources(0, 8)` + 8 AddRef / Release +
+  8 probes, ~130 ns x 700-1100 draws per VR frame = 0.09-0.14 ms. Now: (a) the PS's discard-alpha t-slots (census `ScanPs`
+  `discardTex`, handed to `LodPsNote` at CreatePixelShader in a parallel `g_lodPsSlots` table, memoised with the class) -> one
+  `PSGetShaderResources(slot, 1)` per alpha slot (usually 1; unknown = the old 0..7 batch); (b) depth-only binds are skipped
+  (`g_omColorless`, set in hkOMSetRenderTargets, reset by ClearState / ExecuteCommandList / SwapDeviceContextState); (c)
+  pending entries older than 60 s are dropped (`kPendMaxAgeMs`, `CutoutMips::AgedPrefix`), so `g_pendN` returns to 0 between
+  streaming bursts. Estimate: ~0.01-0.03 ms per VR frame while something waits, ~0 otherwise. The SRV memo is still cleared once
+  per Drain with new entries (cheaper than a selective forget: a memoised view's resource is unknown without GetResource).
+  Stats line: aged out, draws by slot mask / by 0..7, depth-only skips.
+- P2 loader wait: 100 ms per texture / 100 ms per s -> 4 ms / 20 ms per s; never on the render thread, the presenting thread
+  (`g_plPresentTid`) or the present-layer game thread; the first waiting thread id is logged once (level 4).
+- P3 `hkUpdateSubresource(1)`: `CutoutWants()` = the resource type (one virtual call) before the TLS reads, the OFXR return-address
+  check and the scratch vector (constant-buffer updates no longer enter the cut-out path).
+- P4 `dlaa_mv_dilate` is no longer switched by the live Off (`PicFixes::OffKeeps` / `OffOver` / `LiveOver`): every Recommended <->
+  Off press recreated every NGX feature (46 ms per unit flat, 100+ ms VR, + a history reset). Off keeps its current value (also a
+  start with picture_preset = off: the value of the set Off returns to); it is changed in Custom. `Off()` itself stays all-zero.
+- P5 `PowerLineStamp` / `WireOnDraw`: the game-wire PS and the wire PS kind join the per-PS memo of `SolidKindCur` (`PsKindMemo`):
+  one compare per draw instead of a 64-entry atomic scan.
+- P6 `hkVSSetShader`: the census note only while `g_censusOn` (one bool before the TLS read); switch-on marks the VS note unknown.
+- P7 create time: the DXBC checksum once for the census, PrNotePs's `PixelReader::Make` verdict handed to `CensusRun::Note`, the
+  ShInfo of a new bytecode built outside the exclusive `g_lk` (lookup under a shared lock; a racing twin is dropped).
+- P8 not changed: the legend is drawn only into the eye pictures (never a quad), so the eye arm while it shows is needed; it is
+  bounded to the 15 s after a switch-on and the census row.
+
+**Tests**: settings_roundtrip `Phase112rRules` (mv_fwd_depth = 1 + Recommended: explicit, the guard does not trip, Recommended ->
+Off -> Custom -> Recommended keeps it, Save keeps the line; no line: the guard trips; Ctrl+F3 then Recommended stays explicit;
+the kept sharpen set; the kept Recommended copy after a Quality preset change; key_picture_preset wins both orders + a file with
+both); `PicFixRules` updated (hand change from Off = the set Off returns to + that fix, for back = Recommended and Custom; Off
+keeps dlaa_mv_dilate; GateCheck allows Off's kept dilation); census_test `Cutout3` (colour t0 / normal t2 / alpha t1 -> discard
+slots 0x2 only); cutout_mips_test `DrawSlots` + `AgedPrefix`; menu_shot `LegendFitShot` (1080p, 2160p, two VR eye sizes with the
+DLL's own max width / height: fails when the legend would shrink or clip); CI smoke requires the seven census-legend PNGs.
+
+**Needs an in-game check**: far fences / leaves still get their mips with the slot mask (a PS whose alpha the scan misses falls
+back to 0..7 only when its mask is 0 -- a WRONG non-zero mask would leave that texture on the game's mips); the age-out (60 s)
+does not leave near fences unpatched; the loader stays smooth with the 4 ms cap ("queue full" count in the level-4 stats line);
+Recommended <-> Off no longer hitches; census tint in mirrors.
+
+### Phase 113: the Volvo Trucks Center census capture -- 7 suspects fixed or judged, cut-out late read-back, sparse alphas, pole_aa visibility, plain-words legend
+
+Source: the user's double-Insert census capture `captures\census_2026-11-15\shimmer_20261115_145426\` (+ `..._145520\`, the same
+spot, links only; ETS2 flat, Norway, the Volvo Trucks Center by the coast road; `wire_widen 0`, `pole_aa 0`, `cutout_mips 1`). The
+user: "I expect the next time I go back there those issues will be gone". 11 suspects in the file: 4 are the phase-111 pairs whose
+fix was off (d87f5280_2d7ed0e6, 2a9f326e_e19e0136, db9404ad_a761133a: `pole_aa`; 07dfaa00_2585159b: `wire_widen`), 7 are new work.
+
+**Flicker measure.** The phase-111 jitter measure (12 consecutive rewind frames; J = within-cycle std minus the same-phase
+difference) does not work here: the truck was moving (whole frame: same-phase difference 0.23, within-cycle 0.10, J -0.12; phase
+111's still capture had J 0.035), so every pair mask reads motion (J negative everywhere). The rewind frames were also recorded with
+the census tint on. The verdicts below are therefore from the shaders, the state, the pictures and the textures (DDS of every mip),
+not from a flicker number -- said so in each known-list entry.
+
+| # | pair | what it is (evidence) | action |
+|---|---|---|---|
+| 1 | bdce664b_2585159b | kind I's sign-atlas PS 2585159b drawn by a new VS over the dealership's signage / facade (yellow in tinted.png, ~1 k px per draw, 54..4284 indices); 0.60 px per triangle = NOT thin, only "unknown VS" | VS added to pair A's set (`kSolidVsA5`): OSGN byte-identical to 07dfaa00's (harness S107). No suspect any more with `wire_widen` off (not thin); with it on, kind I dithers only its sub-W triangles |
+| 2 | 4186dac5_9c062880 | NOT a decal here: 9c062880 is a forward RE-LIGHT + reflection of opaque meshes (reads t10..t15 at its pixel -- the 109a pixel-reader class, twinned --, adds env cube t3 x mask t4, writes RT0 without blending, depth GREATER_EQUAL, no depth write). picture.png: the whole far white house (cyan) and building parts; ~23 px per draw, 70 draws per frame, 0.12 px per triangle over only 8 samples = a dense far LOD mesh | known pair (thin): it re-colours pixels its G-buffer mesh already drew, it adds no coverage of its own |
+| 3 | 07dfaa00_f8ac351d | forward GLASS: lit + fogged, dual-source blend ONE x src + SRC1_COLOR x dst, no depth write; far window / shelter panes, ~6 px per draw | known pair (thin): a transparent tint over a frame the G-buffer drew; a solid dither would punch holes in glass |
+| 4 | faf4c362_e2128488 | additive glow sprites (SRC_ALPHA + ONE; texture x vertex colour, alpha squared; dynamic-indexed VS cb); 0..6 px per draw. "0.00 px per triangle" = most sprites of a draw are hidden (32..888 triangles, 0..6 samples), not a thin mesh | known pair (thin) |
+| 5 | 6d2c4e63_438d1a63 | the birch / aspen trees on the right bank: 19 % of its checked draws drew a texture with NO phase-77 decision ("not seen by the uploader") | the LATE READ-BACK (113a) |
+| 6 | 8fcd62e3_a9d39be8 | the tall grass along the guard rail: 14 % of its checked draws "not seen" (+ 9848 draws of "worker queue full") | the LATE READ-BACK (113a) |
+| 7 | c2ec5608_a9d39be8 | far roof details on the hill (picture.png); its texture 2048 x 1024 has cov0 1.55 % | SPARSE RULE (113b): its real game mips keep the coverage -> "no loss" |
+
+#### 113a: the cut-out LATE READ-BACK -- textures the uploader never saw, and full queues
+
+- **Why "not seen".** The census asks the phase-77 table (resource pointer -> last decision) at each draw; "not seen" = that texture's
+  mip 0 never went through the hooked `UpdateSubresource(1)`. Measured: the DUMPED tree / grass textures carry binary,
+  coverage-preserving mips (6d2c4e63 t6 4096 x 1024: 37.4 % at mip 0, 35.1 .. 37.5 % on mips 1..9) and phase 77 would PATCH both
+  (cutout_mips_test, the real DDS) -- so the textures the census called "not seen" are other textures of the same pairs, drawn by the
+  trees on the right (orange in tinted.png) while the left bank's grass (same pair) stayed uncoloured. The paths the hook cannot see:
+  (1) the game's **deferred context** -- its `UpdateSubresource` / `UpdateSubresource1` are different code in d3d11.dll (measured on
+  this PC: immediate vs deferred vtable 48 / ctx1 116 point to different functions; the mod hooks the immediate one; the ATS RenderDoc
+  capture shows the game creates a deferred context), (2) `CreateTexture2D` with initial data (not hooked; the ATS capture's 567
+  textures are all DEFAULT without initial data, so this is the less likely one), (3) a GPU copy into the drawn texture. A full worker
+  queue ("worker queue full", 88 in the 0.6 s world-load burst of this log: `loader waited for room 0 times` = the uploads ran on the
+  render / present thread, which never waits) dropped the texture for good: never offered again.
+- **The fix does not depend on which path**: a BC3 texture drawn by a discard PS in a colour pass whose decision is "not seen" or
+  "queue full" is copied ONCE to a staging texture (`CopyResource` through the trampoline) and mapped `DO_NOT_WAIT` 2 Presents later
+  (no stall; given up after 240), then mip 0 and every mip go into `OnMip0` / `OnMipL` exactly like a game upload: the worker
+  analyses it, phase 77b applies our mips at its next discard draw. `src/inject.cpp` `Cutout::LateStart / LateView / LateOnDraw /
+  LatePoll / CensusLate` (WITH_DLAA builds), `src/cutout_mips.h` `LateShape` (BC3, DEFAULT usage -- a late patch is an
+  UpdateSubresource --, one slice, no MSAA, the phase-77 shape rule, `cutout_max_dim`).
+- **Cost bounds**: one discard draw in 4 looked at (`kLateStride`; a texture is drawn every frame, found within frames), one
+  `PSGetShaderResources` per discard-alpha slot + a view memo (cleared every 900 Presents: a reused view pointer is looked at again);
+  at most 4 copies in flight, 96 MB copied per second; textures with a decision cost one memo probe. `Cutout::Busy()` is now true
+  whenever `cutout_mips` is on (the late check needs the draw hook); the check itself starts with a counter test.
+- **Census**: new reasons `kCutLate` ("being read back from the GPU for the cut-out mips (phase 113)", WAIT: never tinted) and
+  `kCutNoWrite` ("cannot be patched (not a DEFAULT-usage texture)", BAD). The census's own per-draw check (`CutReasonOfView`) starts
+  the read-back at once for a "not seen" / "queue full" texture (`Cutout::CensusLate`), so the view does not flash orange for them.
+- **Log** (level 4 stats line): `phase 113: sparse alphas by their real mips: no loss N, rebuilt N, left N; late read-back: views
+  looked at, started (unseen U, queue full Q), fed, cannot be patched, shape, busy, gave up, failed, MB copied`; one level-3 line at
+  the first late read-back. **How many textures the new path covers is measured in the game only**: this capture's log has no
+  per-texture count (the census counted DRAWS: 28424 of 145970 checked tree draws and 10565 of 64572 grass draws drew a "not seen"
+  texture; 25344 / 9848 / 10430 checked draws of c2ec5608 / 8fcd62e3 / 6d2c4e63 drew a "queue full" one).
+
+#### 113b: sparse alphas (cov0 under 2 %) are judged on the game's REAL mips
+
+- c2ec5608's texture (census DDS, every mip): cov0 1.55 %, and the coverage at the 0.05 cut RISES on the game's own mips (x 1.09 /
+  1.16 / 1.26 / 1.44 / 1.90 on mips 1..5, soft texels 0.2 -> 12.5 %): a box-filtered alpha, nothing lost. Phase 110b's "sparse: the
+  game's mips lose it" was a guess from the 0.5-threshold rule; for 1-texel lines with threshold mips it is true.
+- `src/cutout_mips.h` `SparseCandidate / RealMinRatio / SparseDecide`, used by the worker (it holds the game's mips of a cache miss):
+  the worst cov_L / cov0 of the REAL mips over the mips with cov0 x texels >= 4 (`kSparseMinTexels`; smaller ones are quantisation).
+  >= `kLossGate` (0.7) -> "no loss" (census OK); lower -> rebuilt like any cut-out (`Analyse(..., covMin = kCovMinSparse (0),
+  lossKnown = true)`: our K_L = round(cov0 x texels) binary mips; 77b applies them only on discard draws, as always); an empty alpha
+  -> no loss; fewer than 4 passing texels at mip 0 or a real mip missing -> stays "coverage" (census "sparse", BAD). The final plan is
+  what the hash cache keeps.
+
+#### 113c: `pole_aa` -- can the band make a post vanish? Yes: fixed
+
+The user turned the Thin pole fix on after this capture: "the poles disappeared". The cyan tint going away is expected (covered), but
+harness S107 (f) (new) measured the real thing: a delineator post (3.5 cm: 1.0 px at 55 m, 0.55 px at 100 m, 0.37 px at 150 m; two
+faces of w / 2, the game's 8 jitter phases on both paths, 64 frames, per column: the ink, the share of frames the column shows the
+post, the longest run of frames with nothing):
+
+| post | game raster: shown / longest gap | 109d pole mode (W 1.5, per-pixel noise): shown / gap | phase 113 (W 1.0): shown / gap (95 % of columns) |
+|---|---|---|---|
+| 1.00 px (55 m) | 100 % / 0 | **69 % / 4** | 100 % / 0 (0) |
+| 0.55 px (100 m) | 56 % / 2 | 54 % / 7 | 55 % / 2 (2) |
+| 0.37 px (150 m) | 38 % / 4 | 37 % / **18** | 37 % / 7 (2) |
+
+The ink was always right (1.00 / 0.55 / 0.37 rows per column), but 109d's per-pixel noise left whole columns of a post empty for up
+to 18 frames and blanked a 1 px post (which the game's raster draws perfectly) in 31 % of its frames: DLAA's history then lets a far
+post fade out. Three causes, three fixes (`src/wire_widen.cpp` MakeBand pole branch, `Dropped`, `BindSolid`):
+1. **The window moved with the jitter** and a golden-ratio time term BEAT against the 8-phase jitter sequence (0.618 r - jy_r
+   clusters in [0.72, 0.85] for r = 0..7: a column was either on for a long run or never). The GS now moves the face's lines by the
+   pass's jitter (`g_p.w` / `g_q.w`, from `BindSolid(..., jitX, jitY)` = `g_jx`, `g_jy`): the window is measured from the
+   UN-jittered pixel.
+2. **One noise value per pixel line along the pole** (`floor` of the pixel coordinate along the band, picked from the gradient of
+   the edge distance, i.e. the across direction; spread by the plastic constant), the same for every pixel across it -- the faces'
+   and rows' windows stay disjoint -- and in time an **8-frame rank-1 lattice** `(frame mod 8) x 3 / 8`: a line with share k is
+   shown in round(8 k) of every 8 frames, evenly spread (simulated: the longest gap for k = 0.2 / 0.37 / 0.55 / 0.8 is 7 / 4 / 2 / 1
+   frames; the golden ratio 8 / 5 / 3 / 2).
+3. **Both halves of a face use the same box**: centred on the triangle's LONGEST edge (the diagonal the two triangles share) instead
+   of each triangle's short-edge-to-far-vertex line (the window is periodic in W, so any W-wide box holds exactly one period).
+
+And **`pole_min_px` default 1.5 -> 1.0**: a 1.5 px box holds two pixel rows half of the time, so with the new rules a 1.5 px band
+still gives far posts longer gaps (S107 f at W 1.5: 0.55 px post longest gap 4, 95 % of columns <= 3; 0.37 px 7 / 4) than the 1 px
+band (2 / 2 and 7 / 2); 1 px matches the game's own raster on every measure but the single worst column. The sample and README say
+so; an ini line keeps the old width. A post wider than the band passes through bit-exactly (S107 f: a 2 px face, 0 words differ). The GS / PS never drop a post's
+pixels without drawing the band: a pass-through triangle has k = 1, BindSolid binds the GS and the PS copy together or nothing
+(EnsureSolid failure = the game's shaders). Not measured in the game: whether DLAA now keeps far posts visible (the user's check at
+that spot).
+
+#### 113d: the census legend in plain words
+
+`src/census_legend.h` (the user's text): title **"Census: coloured = no fix in the mod yet"**; "Each colour is a different kind of
+problem (thin, see-through, water, ...). You do not need to know which."; "Something coloured? Press <capture key> twice. That saves
+it so it can be fixed."; "Already saved objects are not saved twice. Colours off: <census key>." (unbound keys: the menu rows); and
+ONLY while a draw was tinted in the last 120 Presents because a fix of the mod is switched off (`Census::FixOffKinds`: a kind the mod
+would cover with wire_widen / pole_aa / power_line_fix / pixel_reader_fix / water_overscan_fix on, or cutout_mips = 0;
+`CensusRun::g_fixOffTintAt`): "Some colours mean a fix is switched off: see Picture preset." Then one small colour-key row: a swatch +
+one word each, in the asked order **thin / see-through / pixel / water / new** (the tint table's RGB). `TuningMenu::Legend` is now
+title + 5 plain lines + key entries (`menu.cpp` LegendMeasure / RenderLegend: lines 14 px white, key row 13 px bold words in their
+colour). Strings English only (lang/template.pot regenerated).
+
+#### 113e: the census
+
+- Known list (`census.h` `KnownPairs`): + 4186dac5_9c062880, 07dfaa00_f8ac351d, faf4c362_e2128488 (thin, no switch), each with its
+  evidence (14 entries). Pair A's VS set: + bdce664b (`wire_widen.cpp` `kSolidVsA5`).
+- The census file header names the new cut-out rules (late read-back = waiting; "cannot be patched"; sparse only when its real mips
+  were not judged).
+- **Replay of the 14:54 file** (census_test `Phase113`): 11 suspects -> with the ini at the capture (`wire_widen 0`, `pole_aa 0`)
+  **4** (d87f5280_2d7ed0e6, db9404ad_a761133a, 2a9f326e_e19e0136: pole_aa; 07dfaa00_2585159b: wire_widen); with **`pole_aa 1` (the
+  user's ini now) 1** (07dfaa00_2585159b, the sign atlas of kind I: wire_widen); with both on **0**. Every remaining one is a fix that
+  is switched off (the legend line shows).
+
+#### Phase 113 tests
+
+harness S107 (VS bdce664b: checksum, OSGN = 07dfaa00's field by field AND byte for byte, loads, in pair A's set not pair D's; (f) the
+post visibility table above for W 1.0 and 1.5 + the wide post pass-through); census_test `Phase113` (reasons, VS set, the three
+known pairs + their real bytecode, FixOffKinds, the replay three ways; updated: 14 known pairs, kCutLate covered); cutout_mips_test
+(synthetic sparse lines with threshold mips -> rebuilt, our mips keep >= 0.85 cov0; with line-keeping mips -> no loss; empty / two
+texels / a missing mip / only coverage rejections are candidates; LateShape for every refusal; local: the three real census textures
+-- c2ec5608 -> no loss, 6d2c4e63 / 8fcd62e3 -> patched); settings_roundtrip (legend text, key order and RGB, the bindings in the
+lines, the fix-off line on / off; pole_min_px default 1.0); menu_shot `census-legend*.png` + new `census-legend-fixoff.png`,
+LegendFitShot with the tallest form (fix-off line) at 1080p / 2160p / two VR eye sizes.
+
+**Not verified in the game**: how many textures the late read-back covers at that spot (stats line) and that the right-bank trees /
+guard-rail grass are no longer orange; the far delineator posts with pole_aa on (visible, steady); the legend's look in the headset;
+the cost of the late check (estimated well under 0.01 ms per frame once every drawn texture has a decision).
+
+### Phase 113b: a census thin test that finds real flicker, not dense meshes
+
+Source: the user's screenshot after installing phase 113 (ETS2 flat, the Volvo Trucks Center, `pole_aa 1`, `wire_widen 0`) and its
+capture `captures\census_2026-11-15\shimmer_20261115_163350\` (copied from the game folder's `dlaa_selftest\`): with the census view on,
+the building's windows and glass doors, the tops of the far hill forest and a strip at the water edge were CYAN ("thin") -- big,
+plainly visible surfaces. The 16:34 `dlaa_census.txt` had 12 suspects, all thin: #1 bdce664b_2585159b (the windows / doors, 18 444 px
+average, 0.05 px per triangle -- phase 113's VS in pair A made it "thin, wire_widen OFF" instead of "unknown VS"), #2 9d73eba3_38542285
+(the hill-forest band + the water-edge strip, IndexCount 1536..72969), #3 7fcd07d6_b67da69f (a solid 8 x 10 px far billboard, its
+picture.png), then nine pairs of 2..111 px average.
+
+**Root cause.** "Thin" was occlusion-query pixels per triangle < 0.50 over a whole draw. A DENSE mesh (many sub-pixel triangles and
+no gaps: a facade atlas, a far LOD forest, terrain, a car) passes that while its surface is solid and steady, and the tint then
+coloured the whole draw. Phase 111 / 113 hand-listed 14 such pairs (`Census::KnownPairs`); that does not scale.
+
+#### The jitter probe (`src/census_probe.h`, new; WITH_DLAA via `src/census_run.h`)
+
+The question asked is "does this draw's coverage flicker under the jitter?". The probe answers it per PIXEL in one frame:
+
+- Right after the game's draw (its state bound, after the mod's own work on it -- `CensusRun::Probe`, called in both indexed draw
+  hooks before the tint), the same draw is re-issued **depth-only** (null PS, no colour target, depth test off) into the mod's own
+  render-size **D24S8 stencil** buffer, once at each of the mod's 8 Halton(2,3) offsets around the draw's un-jittered viewport
+  (`TopLeft - g_vpShiftX / Y + Offset(k)`). Pass k uses stencil NOT_EQUAL on bit k + REPLACE: a pixel counts once per pass however
+  many triangles cover it (so a dense or self-overlapping mesh is not counted per triangle). One occlusion query over the 8 passes =
+  the summed coverage = 8 x the mean coverage M. A 9th pass (offset 0, EQUAL 0xFF, op ZERO) counts the pixels covered at ALL 8
+  offsets = I. **Stable fraction S = I / M.** A clear of the mod's buffer ends the probe; the game's targets (UAVs kept),
+  depth-stencil state + ref, viewports and PS + class instances are restored exactly (WARP test). Every call runs with `t_inDlaa`
+  quiet (the hooks pass through; DidShadow notes the DSS / PS it sees and gets the game's back); the clear goes through the original
+  `oClearDSV`; the target swap uses the un-hooked `OMSetRenderTargetsAndUnorderedAccessViews(..., KEEP_UNORDERED_ACCESS_VIEWS)`.
+- Geometry: a solid w x h region has S ~ (w - 0.81)(h - 0.78) / (w h) (the 8 offsets span 0.81 x 0.78 px), whatever its
+  triangles; a post / wire / rail under ~1 px has S = 0 (no pixel is covered at every offset); the 57 posts of one instanced
+  delineator draw keep S low because it is per pixel (a scalar count averages them out).
+- **Thin = S < 0.35** (`kStableThin`) for a probe with a mean coverage of at least 8 px (`kProbeMinPx`; smaller = "too small", no
+  evidence either way). A PAIR is **thin** once it has >= 3 probes with enough pixels and >= 2 of them AND >= 25 % are thin; else
+  **steady**; before that **measuring** (never a suspect, never tinted). Judge's `thin` = the px-per-triangle PRE-FILTER (kept,
+  unchanged: it picks the candidates) AND the probe's THIN.
+- **Per draw** (`CensusProbe::KeyTable`, 16384 direct-mapped slots): key = pair + IndexCount, StartIndex, BaseVertex, instances,
+  StartInstance + world-pass position (VR: the eye pass) + the ordinal among same-key draws of the pass (up to 4). The tint colours a
+  thin (or unknown-VS) pair's draw ONLY when that draw's own last probe was thin: a PS that draws big windows and thin posts tints the
+  posts; a draw not probed yet stays uncoloured. A draw's verdict is fresh for 900 Presents (no new probe of it before).
+- **Unknown-VS needs a confirmed thin pair** (`Census::Judge`): a known wire / solid PS with a new VS drawing a big steady surface is
+  nothing for wire_widen to fix. The "a fix is switched off" legend line follows (FixOffKinds uses the confirmed `thin`).
+- **When**: thin candidates' draws in the jittered world / eye passes (never a mirror pass, never a preview), one probe per pair per
+  Present, `kProbesPerPresent` = 2 per Present (2 occlusion queries each, out of the existing 8 per Present shared by the eyes; the 4
+  are reserved only while a draw waited for a probe in the last Present -- the px-per-triangle samples get the rest). A pair whose
+  thinness a fix covers (wire_widen, pole_aa, power_line_fix, the known list) is probed only until it has a verdict (the file shows
+  it); any other until 48 probes, then only while the view is on and the pair is thin (its new draws get their own verdict).
+- **Text**: `dlaa_census.txt` per pair "jitter probe (phase 113b): N probe(s), T thin, S too small; X % of its pixels covered at all
+  8 jitter offsets (lowest Y %) -> verdict", a new section "THIN CANDIDATES the jitter probe cleared or is still measuring" (with "on
+  the known list" marks: in-game evidence for the list entries), the KINDS header, the header's probe counters (made / failed /
+  lost), the census `why thin` line of draw.txt / index.txt, and the level-4 periodic line (probes, CPU ms per Present, candidates
+  thin / steady / measuring).
+
+#### Evidence (census_test `Phase113b`, WARP: the real `CensusProbe::Run` on real rasterisation, the game's phase 3 as "current")
+
+| mesh | tris | px / tri | mean px | per-phase wobble | stable S | probe (old px/tri rule) |
+|---|---|---|---|---|---|---|
+| post 0.4 x 60 px | 2 | 0.00 | 22.5 | 2.67 | 0.00 | THIN (thin) |
+| post 1.0 x 60 px | 2 | 30.0 | 60.0 | **0.00** | 0.00 | THIN (not thin) |
+| pole 3.0 x 60 px | 2 | 90.0 | 180 | 0.00 | 0.67 | steady (not thin) |
+| 57 posts 0.3..1.2 px in ONE draw | 114 | 14.8 | 1664 | **0.24** | 0.18 | THIN (not thin) |
+| power line 0.35 px, 3 deg / 30 deg | 2 | 69.5 / 50.0 | 140 / 105 | **0.01 / 0.10** | 0.00 | THIN (not thin) |
+| 4 sagging power lines 0.5 px | 320 | 2.74 | 892 | **0.05** | 0.00 | THIN (not thin) |
+| dense facade 120 x 60 px, 0.125 px^2 triangles | 57600 | 0.12 | 7200 | 0.00 | 0.98 | steady (**thin**) |
+| the same drawn twice (overlapping) | 24682 | 0.58 | 7200 | 0.00 | 0.98 | steady (not thin) |
+| far forest band 300 x 8 px + crowns | 19275 | 0.15 | 3101 | 0.09 | 0.87 | steady (**thin**) |
+| glass panes 12 x (18 x 24 px) | 41472 | 0.12 | 5184 | 0.00 | 0.91 | steady (**thin**) |
+| 40 far houses 3..6 px | 480 | 1.42 | 665 | 0.09 | 0.62 | steady (not thin) |
+| 8 x 10 px block (the 7fcd07d6 billboard) | 800 | 0.10 | 80 | 0.00 | 0.79 | steady (**thin**) |
+| window lattice, 1 px frames (reported only) | 22 | 41.1 | 883 | 0.00 | 0.00 | THIN (not thin) |
+
+- The thin cases sit at S 0.00..0.18, the steady ones at 0.62..0.98: 0.35 is in the gap. The 4 dense steady meshes the old rule
+  called thin are all cleared.
+- **Why not the coverage wobble** (one occlusion count per jitter phase while the draw is static, (max - min) / mean -- the idea in the
+  task): 5 of the 7 thin cases have a wobble under 0.25 (a 1 px post: 0.00 -- it jumps columns, its count stays 60; the 57-post draw
+  0.24; the wires 0.01..0.10): a scalar count averages a draw's many sub-pixel features out and cannot see a dash pattern move along
+  a wire. It also needs the camera still across 8 frames. The probe needs neither.
+- A 1 px frame lattice is thin by this measure (S 0): a draw made mostly of 1 px lines does crawl. A facade whose draw is big panes +
+  thin frames stays steady (pooled per draw: the panes dominate).
+
+#### Replays (census_test `Phase113bReplays`)
+
+The captures hold no per-draw jitter data, so each thin candidate gets the outcome its mesh predicts from the WARP cases above
+('T' the delineator posts d87f5280 / 2a9f326e + their reflector band db9404ad, 'S' the dense facades / houses / cars / terrain /
+cards / glass / the hill band / the billboard, 'U' unknown -- measuring in the replay, the in-game probe decides):
+- **10:48 Norway** (31 suspects; 14 candidates: 9 cleared, 2 unknown): `wire_widen 0 + pole_aa 0` **3** (the posts + band),
+  `pole_aa 1` **0**, both on **0** -- the same WITHOUT the known list, except that the reflector-band re-light db9404ad_a761133a
+  stays (1) while pole_aa is on: its list entry is still needed.
+- **14:54 Volvo** (11 suspects; phase 113: 4 / 1 / 0): **3 / 0 / 0** (no list: 3 / 1 / 1, db9404ad again).
+- **16:33 Volvo, the screenshot** (12 suspects, `wire_widen 0 + pole_aa 1`): **0** confirmed suspects -- #1 windows, #2 hill band +
+  water strip, #3 billboard cleared ('S'); the other 9 (2..111 px average, no picture of their mesh) are left to the in-game probe
+  (measuring = uncoloured until it says thin).
+
+#### The 14 known pairs
+
+Kept. What the probe should clear by itself (from their geometry + the WARP analogues; the census file's new candidates section
+shows each one's real verdict in the game): the far facades 07dfaa00_c92c7c22, industrial roof 9d73eba3_5396e5a9, town houses
+5ebed025_7c55acee and their window-light pass 97d9c72d_0a1ed38a, terrain strips 3c957c7c_18e8e355, grass strips 07dfaa00_ad165830, far
+cars 1ec77518_b8636556, grass / hedge cards 2f9ff4a3_438d1a63, flower clumps c8dddb32_438d1a63, the forward re-light 4186dac5_9c062880,
+forward glass 07dfaa00_f8ac351d (11: dense / solid, S well above 0.35); the far car glass 8ba7d8da_fd5e16e5 (~1 px per draw) and the
+glow sprites faf4c362_e2128488 (0..6 px per draw) are most likely "too small" (never confirmed thin). **Still needed**: the reflector
+band re-light db9404ad_a761133a -- it IS a thin band on the posts; its entry makes pole_aa count as its fix.
+
+#### Cost
+
+Only while the census is on and a candidate's draw has no fresh verdict. CPU: per probe ~25 state calls + 9 draw calls + 2 queries
+(estimate 15..30 us; measured by the periodic line `phase 113b: ... ms CPU per Present`), at most 2 per Present. GPU: 9 depth-only
+re-draws of that one mesh + one stencil clear of the render-size buffer (2880 x 2160 D24S8 = 25 MB; one buffer per size, VR eyes of
+two sizes keep one each); not measured in the game. Queries: no more than before (8 per Present). Memory: the stencil buffer(s) +
+the 512 KB key table, made at the first probe.
+
+#### Phase 113b tests
+
+census_test `Phase113b` (Offset = the mod's JitterOfPhase; Result / PairProbe verdicts incl. measuring-forever on small probes and
+"one thin probe is never enough"; KeyTable ordinals, eyes, the kOrdMax limit, freshness, a replaced key; WARP: the 14 meshes above
+with the one-query sum = the per-phase counts, the probe at the game's own phase = the game's pixels (each once for overlapping
+meshes), the game's targets / DSS + ref / viewport / PS restored, one stencil buffer for every probe), `Phase113bReplays` (3 files,
+with and without the known list); updated: unknown-VS only with a confirmed thin pair (Synthetic, the 110b Norway replay 16 -> 15).
+
+**Not verified in the game**: that the windows / hill band / water strip are no longer cyan at the Volvo Trucks Center, that real
+posts / wires turn cyan after their probes (about a second of driving with them on screen), the probe's GPU cost and whether a game
+draw path breaks the depth-only re-draw (a game GS / tessellation would be re-run too; none are known in ETS2 / ATS world passes).
+
+### Phase 114: the census objects of the user's evening VR captures (bus, car, flags) + the VR legend in stereo
+
+Source: the user's VR drives after phase 113b (DLL A7EB8CED), `captures\census_2026-11-15_evening\` -- ETS2 `shimmer_20261115_172644`
+(in a bus; `wire_widen 0`, `pole_aa 1`) and ATS `shimmer_20261115_173946 / 174005 / 174038 / 174852 / 174905` (an oncoming Charger at a
+dealership with pennant flags, then a perforated wall at dusk; `wire_widen 0`, `pole_aa 0`), each game's `dlaa_census.txt` (4 / 16
+suspects) and log. The user: "YELLOW on the bus itself ... things not captured, like on a CAR. Lots of yellows, and some FLAGS".
+
+**What "yellow" was.** Almost none of it was the unknown-VS yellow. The cut-out tint is linear (1, 0.45, 0) -- in the sRGB picture
+(255, 179, 0), a gold that reads as yellow (the bus's tinted pixels: (112, 80, 0)). Measured in every tinted.png: 0..114 cyan pixels and
+0..294 true-yellow pixels per frame; the coloured areas are ORANGE cut-out draws: the bus's window seals, the Charger's grille and plate,
+the pennant flags, the perforated wall band.
+
+| pair | game | what it is (evidence) | verdict | fix |
+|---|---|---|---|---|
+| 7fcd07d6_c55c787d, 07dfaa00_c55c787d | ETS2 | the BUS window rubber seals (picture.png: the window frames orange; 7fcd07d6 = the skinned VS); t6 BC3 32 x 128, 8 mips, a blocky 64 % alpha whose real mips keep 64 / 64 / 66 / 63 % | "shape / size rule" = min(W, H) < 64: never analysed | `kMinDim` 64 -> 8: phase 77 decides it ("coverage over 60 %": the game's mips keep it = OK) |
+| 9d73eba3_9762bfe0 | ATS | the Charger's GRILLE (picture.png: the grille alone orange); t6 BC3 32 x 16, a hexagon ring pattern, 37.7 % | the same size rule | analysed now: **patched** (the 0.5-threshold game rule thins it to 0.66 x at mip 2) |
+| 07dfaa00_cfc52d43 (ATS), 4186dac5_8c187c6b (both) | both | the plate / sign ATLAS: t6 = a 2048 x 2048 RGBA8 **render target** with 12 mips (the plates; the perforated wall band at 17:48 -- picture.png of cfc52d43 = that band alone) | "format not BC3" | **render target = OK** (`kCutRenderTarget`): the game draws that alpha; there is no stored alpha to rebuild |
+| c2ec5608_a9d39be8 (17:39 captures) | ATS | the PENNANT FLAGS over the dealership canopy (picture.png: the bunting alone gold); t6 = BC1 256 x 256 | "format not BC3" | decoded: **0 see-through texels on every mip** -- an opaque BC1, the discard never fires -> `kCutOpaque` = OK (the flag shape is geometry). The uploader / late read-back now scan BC1 mip 0 (114a) |
+| 07dfaa00_7770320b, 102d6301_18de7f8b | ATS | BC1 cut-outs in the forward pass (0 / 16 px per draw), never dumped | "format not BC3" | decided in the game by the new BC1 check: opaque = OK; with see-through texels = `kCutBc1Alpha` (still a suspect: phase 77 rebuilds BC3 only -- the stats line counts them) |
+| 07dfaa00_cfc52d43 | ETS2 | kind G PS; the "shape / size rule" texture of its BAD draws was not dumped | unknown | likely a small / one-mip texture now handled; left to the game |
+| 07dfaa00_6ff10d0c | ATS | AI CAR body / trims (car atlas + reflection cube; picture.png: the whole Charger; tinted.png: none of its body -- only some trims were probe-thin) | thin (probe 341 / 374) | **known, no dither on purpose**: moving cars -- phase 80 keeps moving draws undithered (a new coverage every frame = no DLSS history); their motion is the per-draw MVs' |
+| 07dfaa00_a5577dee | ETS2 | truck / trailer CHASSIS atlas (reefer unit, wheels, frame parts + reflection cube; ~13 px per draw) | thin (73 / 160) | **known**, the same reason (moving AI trucks / trailers) |
+| 4186dac5_68ad6bcb | ATS | forward ADDITIVE reflection (SRC_ALPHA + ONE, no depth write, env cube x BC4 mask; G-buffer read twinned) | thin (8 / 28) | **known**: it adds light to pixels the G-buffer drew -- the 4186dac5_9c062880 case |
+| 4a6b7f2a_73c69246 | ATS | ground / terrain strips (dirt-grass 2048 x 2048, 42..432 indices, ~5 px per draw) | thin (316 / 386) | **known**: ground on ground of the same look -- the 3c957c7c_18e8e355 case |
+| 6c53c441_34860eed | ATS | pair B's PS (lattice towers / street lights / fences) with a NEW VS; first seen +414 s, never in a capture: no bytecode | thin + **unknown-VS** (the one real yellow) | the VS set rule now runs in the game: **OSGN join** (114b) |
+| 6c157c5f_34860eed, 9d2904cd_d3af2ebb | ATS | pair B (the chain-link fence frame, cyan in its picture) / pair E | thin, fix OFF | `wire_widen` (the legend's fix-off line says so) |
+| 2a9f326e_e19e0136, db9404ad_a761133a | ATS | the delineator band + its re-light | thin, fix OFF | `pole_aa` (OFF in the ATS ini) |
+| 3847be86_36af737f | ATS | a plain grey concrete material (512 x 512 BC3 + BC4 / BC5) with pair D's static VS; ~5 px per draw | thin (284 / 380, 27 % stable) | NOT fixed: needs its own bit-exact solid port (a kind J with GSolidD) -- left as a suspect |
+| 115d4014_9026a063 | ATS | an UNTEXTURED vertex-colour mesh (COLOR0 albedo, COLOR1 material; 169 draws per frame, ~52 px); no picture shows it | thin (353 / 384, 75 % stable pooled) | NOT identified -- left as a suspect |
+| 0dfced74_c447bb43 | ATS | forward soft-alpha cards, 0 px average, not in a capture | thin (6 / 19) | left (no evidence) |
+
+#### 114a: cut-out rules
+
+- `src/cutout_mips.h`: `kMinDim` 64 -> **8** (mip 1 still >= 4 px; the fallback gate judges 8..15 px textures on mip 1). The analysis
+  is size-independent; small textures cost nothing. `Bc1SeeThrough` (new): the see-through texels of a BC1 mip (3-colour blocks,
+  index 3; c0 <= c1 as integers).
+- `src/census.h`: reasons `kCutOneMip` (one mip level: no smaller mip can lose coverage), `kCutRenderTarget`, `kCutOpaque` (all OK) and
+  `kCutBc1Alpha` (BAD).
+- `src/census_run.h` `CutReasonOfView`: a render-target texture -> `kCutRenderTarget`; one mip (one slice) -> `kCutOneMip`; BC1 -> the
+  uploader's BC1 verdict, a never-seen BC1 is read back (`Cutout::CensusLate`), else "format not BC3" as before.
+- `src/inject.cpp` `Cutout::Bc1Check` (the hooked mip-0 upload of a BC1 with a mip chain, whole mip only) and the LATE path for BC1
+  (`LateJob::bc1`: any usage, mip 0 mapped, no patch, 8-byte blocks in `LateBytes`). Stats line: `phase 114 BC1 cut-out check: opaque
+  N, with see-through texels N (read back N)`.
+- Pictures (`picture.png`) now tint their pair's draws by the SAME per-draw rules as the live view (the cut-out's own texture, the
+  thin draw's own probe): the 17:39 picture of 07dfaa00_6ff10d0c coloured a whole car the view never coloured.
+
+#### 114b: a VS joins a solid VS set by its output signature (wire_widen, pole_aa and the census)
+
+Every VS added to a set by hand (66 a484ef85, 107b 9d2904cd / d87f5280, 109e ccd6b6d1, 111 2a9f326e / 7fcd07d6, 113 bdce664b) was added on
+one piece of evidence: its OSGN chunk is byte-identical to the set's first VS. `WireWiden::OsgnSet` / `NoteVs` now do that check at
+CreateVertexShader: the OSGN payloads of 07dfaa00 (A), 6c157c5f (B), 3847be86 (D), e5a4956d (F) are embedded; a VS on no checksum
+list with one of them joins that set (`NoteVs` returns the letter; inject.cpp logs `wire_widen (phase 114): VS xxxxxxxx joins solid VS
+set X`, 32 lines max). On the 50-VS corpus under `captures\` the rule reproduces every hand-made set exactly and adds two VSs
+(5e03b1ca -> A, 9d3fd72b -> D). Moving draws stay undithered (phase 80's static gate is per draw, whatever the VS). Risk: an
+instanced draw skips the static gate (as it already did for the hand-added VSs); with `pole_aa 1` (the user's ETS2 ini) kind D / H
+draws of a joined VS get the pole mode too.
+
+#### 114c: the census legend / status box in VR -- one stereo placement (`src/census_legend.h` LegendVr, inject.cpp drawCapStatus)
+
+The video analysis of the user's clips ("seeing duplicates"): with the menu open the legend was placed over the eye-picture panel's
+centre (u W + menu_vr_x W); with ATS's `menu_vr_x = -18` and the Quest 3 optical centres u = 0.379 (eye 0, right) / 0.621 the right
+eye's box started left of its picture, and `DrawLegend` clamped it back in THAT eye only -> uncrossed disparity (beyond infinity),
+double vision. With the panel as an OpenXR quad (`menu_vr_layer 1`, `menu_vr_lock 1`) the legend aligned to an invisible panel.
+- Both eyes now use ONE offset dx from their own optical centre (`LegendVr::SharedDx`: clamped once so the box fits BOTH pictures,
+  computed from both eyes' centres / scales -- the same inputs in both eyes' calls) and differ only by the depth shift of a
+  head-locked point at **0.8 m** (`LegendVr::DepthShiftPx` = ipd x fx / (2 d); the located views' ipd, each eye's |P00|;
+  `menu_vr_depth` only while no scale is known) -- the cab / panel distance instead of a few metres behind the A-pillar. The status
+  box the same; one height for both eyes (the two centres' mean v). The legend's size is measured once per text (`LegendRefSize`) and
+  shrunk before the draw, so DrawLegend's own clamp never moves one eye.
+- Menu open: over the eye-picture panel only while the panel IS in the eye picture; a quad panel -> 20 % above the optical centre.
+- The legend shows again for 15 s when a double-Insert capture finishes with the view on (and, as before, while the menu is on the
+  census row).
+- Measured in settings_roundtrip (W 3448, the legend box 1484 px, the user's u / menu_vr_x -18): the OLD placement's disparity error
+  vs the intended one **-67.8 px** (one eye clamped; uncrossed), NEW **0.00 px**; 0.8 m = 67.9 px inward per eye at |P00| 1 (was
+  menu_vr_depth 12 px). (The video measured -20..-22 px: its frames are the downscaled mirror, and the box width there differs.) NOT done: the quad-layer legend (preferred, larger) -- the legend is still
+  head-locked in the eye pictures.
+
+#### 114d: VR check of phases 113 / 113b from the logs
+
+`phase 113b: jitter probes 624 (failed 0, lost 0)` (ETS2), `5000 (failed 0, lost 0)` (ATS), 0.0003..0.0005 ms CPU per Present. The 113
+late read-back ran: ETS2 2 textures fed, ATS 225 fed (302.5 MB copied over ~20 min), 0 failed / gave up.
+
+#### Phase 114 tests
+
+census_test `Phase114` (the new reasons, the 4 known entries -- 18 now --, the replays below); cutout_mips_test (Bc1SeeThrough, the
+shape rule at 8 / 32 px, local: the bus seal -> coverage, the grille -> patched, the flags -> 0 see-through texels on every mip);
+drawid_harness S114 (the embedded OSGNs = the game's, every hand-added member found by the rule, other families not, NoteVs join /
+forget, the corpus); settings_roundtrip (the legend again after a capture; the VR stereo placement OLD vs NEW).
+
+Replays (census_test `Phase114`; rows = every suspect of the two files + the capture-only pairs, BEFORE = the file's reasons and the
+14-entry list, AFTER = the reasons phase 114 gives the same textures; a texture never dumped keeps its reason):
+- ETS2 bus (5 rows): the ini (wire 0, pole 1) **5 -> 1** (07dfaa00_cfc52d43, texture unknown); both fixes on 5 -> 1.
+- ATS (17 rows): the ini (wire 0, pole 0) **17 -> 10**; pole_aa 1: 15 -> 8; both on: 13 -> 6 (115d4014_9026a063, 3847be86_36af737f,
+  6c53c441_34860eed until its VS joins in the game, the two never-dumped BC1 pairs until their check, 0dfced74_c447bb43).
+
+**Not verified in the game**: that the bus seals / grille / plates / flags / perforated wall are no longer orange; the BC1 check's
+counts; which VSs join by OSGN in each game (log lines) and that 6c53c441 is one of them; the legend in the headset (one image at
+~0.8 m, also with the menu open).
+
+### Phase 115: the census view in your face -- a flashing checkerboard after DLAA, "captured this session", the bug icon
+
+The user's VR + flat drives after phase 114: "I hardly noticed the yellows. Flags were yellow and I thought they were just normal flags
+until I toggled it off and on. It must be IN YOUR FACE so people capture it. Don't worry about comfort, debugging is about getting
+attention." And: "I captured flags, drove on, and the next same flags were still coloured as uncaptured." The user chose three options:
+A1 (a flashing missing-texture checkerboard), B1 (captured this session = not highlighted until the next start), C1 (a bug icon with a
+live count).
+
+#### 115a (A1): the checkerboard, painted AFTER DLAA
+
+- **Why the old tint was weak.** The tint re-drew a suspect with one colour at 70 % into the game's own targets: the G-buffer ALBEDO
+  (RT2; then lit by the sun / fog / exposure / tonemap) or the forward HDR colour (x2). On screen that was a dim, lit wash, and DLAA
+  averaged it with its history. The cut-out orange was linear (1, 0.45, 0) = sRGB (255, 179, 0) on screen: hue 42 deg, a gold the
+  user read as yellow (phase 114 measured (112, 80, 0) on the bus).
+- **How now** (`src/census_paint.h` new, `src/census_run.h` MaskTint / PaintAtBlit, `src/census.h` the shader block):
+  1. **Mask.** In the main world passes (not mirrors) every suspect draw is re-drawn into the census MASK instead of the game's
+     colour: an R32_UINT render target of the pass's depth size, one per FIFO pass slot (`MaskSlot g_mask[kRing]`, cleared at the
+     pass's first suspect draw), bound ALONE with the game's depth buffer and the depth-state twin (EQUAL for a draw that wrote depth,
+     else the game's own test). The game's targets (UAVs kept), PS + class instances, cb13 (+ its D3D11.1 window), blend and depth
+     state come back exactly (as the probe / the old tint did).
+  2. **Mask word** (`Census::MaskWord`): bits 0..2 = kind + 1, bit 3 = no depth check, bits 4..31 = the draw's depth (SV_Position.z
+     float bits, the low 4 mantissa bits dropped: 2^-19 relative, the far range keeps its precision). The PAINT shows a word with a
+     depth only where the pass's final depth (its snapshot `slot.twin`; R32_FLOAT_X8X24 / R32_FLOAT views only) still has that value
+     (+-2 steps): a later draw in front hides it -- no X-ray through buildings. A word without a depth (bit 3) always shows.
+  3. **The mask PS must link to the game's VS.** A PS that reads SV_Position must find it at the register the VS writes it to (D3D11
+     linkage; the debug layer: "Semantic 'SV_Position' is defined for mismatched hardware registers"). Measured over every game VS
+     under `captures\` (68 files): 62 write `COLOR0` float4 to o0 + SV_Position to o1, 6 SV_Position to o0, 0 anything else.
+     `Census::VsPosLayout` reads the VS's OSGN at CreateVertexShader (`ShInfo::vsLayout`) and the draw picks `PSMask2` (`float4 COLOR0
+     : v0, SV_Position : v1`; COLOR0 declared but never read -- fxc keeps it in the ISGN), `PSMask1` (SV_Position v0) or `PSMask0` (no
+     inputs = no depth in the word: links with anything). census_test proves the check on WARP with the debug layer: the matching
+     pairs give no error, the two swapped pairs give 2 linkage errors.
+  4. **Paint** (`CensusPaint::Paint`, at every eye / screen blit: `inject.cpp` lambda `censusPaint`): one full-screen triangle into the
+     BLIT SOURCE (the tonemapped picture the game's blit draw is about to read) -- after the HDR unit ran before the tonemap
+     (`dlaa_pre_tonemap = 1`, the user's setting) and after the blit unit's copy-back (it is called after the DLAA chain). Where the
+     mask shows: the kind's colour or black by a screen-space checker; else nothing is written. The game's blit then scales it into
+     the eye / back buffer like the rest of the picture. Every touched state is saved and restored (render targets with the UAVs
+     kept, VS / HS / DS / GS / PS + class instances, PS t0..t15 and b0, input layout + topology, rasterizer + viewports, blend,
+     depth-stencil + ref; binding the blit source as a target unbinds it as the game's t0: it is put back).
+  5. **DLAA never sees it** -- that is the "survive DLAA" method chosen over the phase-49 bias mask: painted after DLAA (the HDR unit)
+     or after the copy-back (the blit unit), there is no history to smooth or trail it and no NGX input to change. With
+     `dlss_upscale` the unit draws its result over its rect AFTER the game's blit (Composite): then the mask is painted into the blit
+     source BEFORE the Run too (DLSS sees the checker; no bias mask -- it may look softer inside the DLSS rect) and again after (the
+     outside). With a `game_taa` mix (a composite-out run) the mod's share is drawn over the rect after the blit: the checker there is
+     the mix's picture of it.
+  6. **Colours** = screen bytes (`Census::KindColour` is sRGB now): magenta (255, 0, 255), **orange (255, 112, 0)** hue 26 deg, cyan
+     (0, 255, 255), blue (32, 64, 255) hue 231 (cyan 180), yellow (255, 255, 0). The paint writes sRGB bytes into an 8 / 10-bit UNORM
+     view (a TYPELESS blit source gets a UNORM view), linear values into an _SRGB-typed target (its view encodes them: the same bytes)
+     or a float target. Measured on WARP (census_test): the rendered orange square reads (255, 112, 0), hue 26.4, the black square
+     (0, 0, 0), also through an _SRGB target; every pair of kinds >= 25 deg apart. The legend swatches are the same bytes.
+  7. **Squares and flash**: `Census::PaintCell` = width / 240 clamped to 8..12 render px (flat 1920 = 8, 4K = 12, VR 2064 = 9, a 2900
+     px VR eye = 12 = ~0.43 deg = ~8 Quest 3 display px). `PaintPhase` swaps the checker 4 times a second (2 Hz on / off, full
+     contrast), taken ONCE per Present (`g_paintPhase`, census OnPresent): both VR eyes of a frame have the same phase. VR: the squares
+     are anchored at each eye's optical centre (`g_optC`), so both eyes' squares meet at infinity; flat at (0, 0).
+  8. **Mirrors** keep the old in-place tint (their passes are no main pass slot; the colour is converted sRGB -> linear).
+  9. **Capture**: the capture's own frames stay untinted (TintHeld: no mask words, no paint); `tinted.png` and the per-pair
+     `picture.png` come from the painted picture (VR: eye 0's blit source after the paint; flat: the back buffer) -- one frame of the
+     checker. menu_shot `census-checker.png` / `census-checker-phase1.png`: the real Paint + PSPaint over the road picture, one object
+     per kind, both phases.
+- **Shaders** (`src/census.h` block `kCensusTintPs`, fxc-validated + embedded): + PSMask0 / PSMask1 / PSMask2 / VSPaint / PSPaint;
+  `ShaderCache` ids kCensusMaskPs0..2, kCensusPaintVs, kCensusPaintPs. Until they are ready (or if they cannot be made: one log line)
+  the view uses the old in-place tint.
+- **Log**: `census (phase 115): mask + paint objects created ...` once; the level-4 census line adds `phase 115: mask draws N (no depth /
+  SV_Position v0 / COLOR0 + SV_Position; other target size N), paints N (failed N), paint CPU .. ms per Present, bug icon ..`.
+
+#### 115b (B1): captured this session = not highlighted until the next start
+
+- `Pair::capSession` = the number of the double-Insert capture that SAVED the pair (`CapFirstDraw`; `Census::CapSaves` = a full dump or
+  a link to its earlier dump; text only (budget spent) does not count). `Census::CapturedHidden`: hidden from the live view once that
+  capture has finished; while it still runs the pair stays highlighted (tinted.png, its own picture.png). A dump picture (`g_hiLeft`)
+  still shows its pair. Memory only: the next game start shows it again unless the mod then has a fix.
+- `dlaa_census.txt`: the head counts "captured this session", a section "CAPTURED THIS SESSION" (VS / PS / kinds / capture number /
+  folder), and the pair's entry says "captured this session (bug report capture N, folder): not highlighted again until the next game
+  start".
+
+#### 115c (C1): the bug icon + its live count
+
+- **Count** (census OnPresent, every 0.25 s at most, `Census::CountBug`): "N to capture" = distinct suspect pairs not captured this
+  session that were SHOWN in the live view within the last ~1 s (`Pair::shownAt` = Present + 1 of its last shown draw; the window's
+  first Present from a 256-entry Present -> time ring; both eyes count once: per pair); "N captured" = pairs with `capSession`.
+  `CensusBugNow` hands them to CaptureAtPresent, `CensusBugLines` (census_legend.h) makes "3 to capture" / "5 captured".
+- **The icon** (`src/menu.cpp` RenderBug): a dark rounded plate (alpha ~67 %), a bug DRAWN with GDI shapes (legs, antennae, a red body
+  with a white rim, a dark head, a back line and spots: no font glyph, no emoji, no download), line 1 bold yellow, line 2 white,
+  outlined like the fps box; the font shrinks 13 -> 7 ref px until both lines fit (menu_shot `census-bug-big-counts.png`: "128 to
+  capture" / "999 captured").
+- **Flat** (`TuningMenu::DrawBug`, 128 x 34 ref px, x 1.25 per 1080 px): a top corner away from the fps box (`FlatBugPlace`: right, or
+  left when the fps box's centre is right of the middle; the status box and the legend are top centre), under the open menu panel
+  when the panel covers that corner. Not on the Present whose back buffer the capture saves (`g_testFinalPending`).
+- **VR**: a 30 ref px STRIP under the fps box INSIDE the fps box's own texture (`TuningMenu::SetWidgetBug`; `WidgetRefH` grows by
+  `kWidgetBugH`, `kWidgetRefHMax` 64 -> 94 for the OpenXR quad image). So it has every placement of the fps box -- drawn into the eyes
+  with its stereo shift, turned, fixed in the cab, attached to the vehicle, the OpenXR quad layer -- the same layer, depth and picture
+  in both eyes by construction. With the fps box OFF: its own box in each eye picture where the head-locked fps box would be
+  (`fps_vr_x` / `fps_vr_y`), with the status box's one stereo placement (`LegendVr::SharedDx` + the 0.8 m depth shift, phase 114c);
+  22 % below the centre while the legend shows. Hidden when the view is off; `g_capStatusOn` includes it (flat; the VR fallback) so the
+  overlay paths draw.
+- **Legend** (`CensusLegendFill`): title "Census: flashing colours = no fix in the mod yet"; line 3 "Saved objects stop flashing until
+  the next game start. Colours off: <key>."; line 4 "The bug icon counts what is left to capture here."; the fix-off line moved to line
+  5. LegendFitShot (1080p / 2160p / both VR eye sizes, with the fix-off line) passes. Strings English only (template.pot regenerated).
+
+#### Cost (estimated from the code; NOT measured in the game)
+
+View off: nothing new (the census gates are unchanged; the paint call = one flag test per blit). View on:
+- Mask draw (CPU): the old tint's saves + OMGetRenderTargets + two OMSetRenderTargetsAndUnorderedAccessViews + the reference releases:
+  ~1-2 us more per tinted draw (50..150 tinted draws per frame in the 2026-11-15 files -> ~0.1-0.3 ms per frame; capped as before at
+  4000 per Present). GPU: the same re-draw into a 4-byte target without blending (no more than the old RGBA16F blend).
+- Paint: one full-screen triangle per eye / screen; it reads the 4-byte mask (+ the depth where marked) and writes only marked pixels.
+  VR ~2 x 10-13 M px -> ~0.2-0.4 ms GPU per frame (estimate), flat 1440p ~0.05 ms. CPU ~35 state calls per blit (~15-30 us).
+- Memory (only while the view is on; released at switch-off and at a device change): one R32_UINT mask per pass slot in use, at the
+  pass's depth size -- flat 1440p 14.7 MB, a VR eye of 3448 x 3700 ~51 MB, up to 4 slots (VR worst case ~200 MB). The paint keeps up to
+  8 render target views on blit sources (each holds its texture; dropped at switch-off).
+- Bug icon: one GDI build per text change (at most 4 per second) + one textured quad (flat), or the fps box rebuild per change (VR).
+
+#### Phase 115 tests
+
+census_test 581 checks (+ `Phase115`: the kind colours as screen bytes + hues (orange 26 deg; the old on-screen orange 42 = gold),
+pairwise >= 25 deg; MaskWord / MaskShows (depth precision near and far); 4 swaps per second; PaintCell 8..12; PaintColour + the anchor;
+CapturedHidden / CapSaves / CountBug; VsPosLayout on synthetic VSs and on every game VS under captures\ (62 COLOR0 + SV_Position, 6
+SV_Position o0, 0 other); WARP with the debug layer: the three mask PSs link to their VSs (0 errors) and the swapped pairs are refused (2
+errors); a G-buffer-like pass (a suspect, a nearer plain draw over part of it, a no-depth forward suspect, an SV_Position-o0 suspect)
+and the real `CensusPaint::Paint` into an R8G8B8A8_TYPELESS blit source with the game's blit state bound: orange (255, 112, 0) and black
+squares of 8 px, phase 1 swapped, the covered part NOT painted (and painted without the depth snapshot), the outside untouched, the
+anchor moves the squares, an _SRGB target gives the same bytes, the game's RT0 / t0 / shaders / viewport / DSS + ref back, no D3D11
+error). settings_roundtrip 136367 checks from an empty folder (+ the legend's new lines and colours; the bug icon only with the view on:
+flat = its own box, VR = the fps box strip (+30 ref px, within kWidgetRefHMax) or its own eye box with the fps box off, off again with
+the view; FlatBugPlace corners). menu_shot: `census-bug.png`, `census-bug-big-counts.png`, `census-bug-vr.png` (the fps box with the
+strip at a VR eye's scale), `census-checker.png` / `census-checker-phase1.png` (measured: the bush pixel orange / black), the legend
+PNGs (LegendFitShot passes with 5 lines); the CI menu_shot step requires the five new PNGs. drawid_harness 160372 / 160418 / 160418,
+every other CI test, settings_check.py, feature_check_test.py (44), lang extract --check + check, log formats (`cl /Zs
+/DDLAA_FMT_CHECK`) clean. Release DLL CRC32 CCB26F5F, 5690368 bytes.
+
+#### Not verified (nothing in the game yet)
+
+- That the checkerboard is in the right place in every pass of both games (G-buffer and forward, flat and both VR eyes), with the
+  user's pre-tonemap HDR path and with the blit unit; that the depth check hides covered suspects and keeps visible ones (a game draw
+  with a rasterizer depth bias may fail the check and stay unpainted, if SV_Position.z differs from the biased depth); the cost lines.
+- That the flash reads well in the headset (2 Hz, 9..12 px squares) and that the optical-centre anchor keeps the squares fused.
+- The bug strip under the fps box in each VR placement (quad layer, fixed in the cab, attached to the vehicle) and the eye-picture
+  fallback; the flat corner with the user's menu / fps box positions.
+- That a captured pair stops flashing after its capture and comes back at the next start; the count in a busy scene.
+
+### Phase 115r: audit fixes for phases 101-115 (Fable + Sonnet audits) -- normal players first, then the census
+
+Source: two audits of the uncommitted phases 101-115 (Fable + Sonnet), the top findings re-checked against the code. Normal players
+(census off, `cutout_mips` on by default since 112c) come first: their cost and correctness. Nothing here was tried in the game.
+
+#### Normal players (census off)
+
+| # | finding | fix |
+|---|---|---|
+| P1 | `LatePoll` (render thread) fed up to 4 WHOLE late read-backs per Present: OnMip0's hash + copy of mip 0, then a copy of every mip. A 4096 x 4096 BC3 = ~21 MB = 6..10 ms in one Present (a dropped VR frame) | ONE job per Present, at most `kLateFeedBytes` = 2 MB (the job in progress, else the smallest due one). Block rows of one mip per map, mip 0 hashed WHILE it is copied (`CutoutMips::HashAlphaBegin` / `HashAlphaRows` = `HashAlpha` in pieces); every map `DO_NOT_WAIT` (still drawing = next Present, never a stall). The finished set goes to `Cutout::LateFinish`: the record is built from the copies (moved: no second copy, no second hash) and handed to the worker like a game upload's last mip (`FinishRecord`, the render thread never waits for room) |
+| P2 | `Bc1Check` scanned every mip-chained BC1 upload with the census off (its verdict is for the census alone) | only while the census is on (`CensusOnNow()`); a BC1 uploaded while it is off is read back by the census itself when it draws it (`CensusLate`, unchanged). The scan: one mask per block (`bits & bits >> 1` & the edge-valid mask, popcount) instead of 16 texel tests, and `Bc1AnySeeThrough` stops at the FIRST see-through texel |
+| B1 / A4 | the phase-77 "why" table `g_whyRes` (65536, direct-mapped) is the census's AND the late path's memory: a colliding upload turned a decided / patched texture back to "unknown" -> `LateView` started a late read-back again (pairs could ping-pong) | the decision is stored ON the resource (`kWhyTag` private data: reason + coverage byte); the table is its cache (`WhyOf`: table hit, else the tag, which refreshes the slot). Loader / render threads tag at `NoteWhy`; the worker makes no D3D call -- its decision rides on the `Done` and `Drain` tags it (only when the texture's `kSeqTag` is still that upload's) |
+| P3 | 77b's `OnDraw` and the late path's `LateOnDraw` each fetched the discard draw's views (PSGetShaderResources + Release per slot); `Cutout::Busy()` is always true with `cutout_mips` | `DrawViews` fetches them ONCE per discard draw (colour pass) for both. The late stride (1 discard draw in 4) backs off x 2 per 120 Presents in which no read-back started, up to 1 in 64 (`LateStrideNext`), and is back at 4 at the next start |
+| P4 | `kMinDim` 64 -> 8 (phase 114) let every tiny BC3 (decals, UI) into the hash / record / worker queue | the game's uploads (and the normal late read-back) also need `W x H >= kMinArea` = **512** texels (`UploadShapeOk`). Chosen from the real textures in `captures\` (cutout_mips_test): the ATS Charger grille 32 x 16 = 512 is the smallest that needs the fix (patched), the bus seal 32 x 128 = 4096. A texture refused for its area alone gets NO decision (stays "unknown"); with the census ON the uploader takes it as before, and a census switched on later reads it back itself (`LateStart(..., census = true)`: no floor). Counted: the stats line's "phase 115r: under 512 texels N" |
+| A3 / B13 | a late copy whose texture got a new upload meanwhile was fed with stale data | the job keeps the texture's `kSeqTag` at copy time; `LatePoll` drops it when the tag changed ("stale copies dropped") |
+| A7 | `RealMinRatio` returned 1.0 when no mip qualified -> `SparseDecide` "no loss" without a measurement | -1 (not judged) when no mip was measured -> the sparse texture keeps "coverage" |
+| A8 | a mip L map failure after mip 0 was fed left a half record until its age-out | gone by design: the late path feeds nothing before every mip is copied (`LateFinish`); a failure drops the whole job |
+
+**Cost, census off (estimates from the code; not measured in the game):** the worst late read-back Present goes from ~6-10 ms (a
+4096 x 4096 BC3, up to 4 such per Present) to <= 2 MB of copy + hash = ~0.2-0.4 ms; a 4096^2 texture now takes ~11 Presents. The BC1
+scan (~0.3-1 ms per 1024^2 BC1 on the loader thread, at every mip-chained BC1 upload) is gone. Per discard draw while idle: one view
+fetch instead of two, and only on 1 in 64 discard draws once nothing new starts (was 1 in 4). Tiny BC3s: no hash / record / job.
+New per-decision cost: one `SetPrivateData` (loader / render thread) + one in `Drain` per worker decision (~1 us each).
+
+#### Census on
+
+| # | finding | fix |
+|---|---|---|
+| B5 / A1 | `MaskTint` bound PS / cb13 / blend / DSS and re-drew WITHOUT `t_inDlaa.Quiet(true)`: hkOMSetDepthStencilState recorded the census twin as the game's DSS and bound an object-id twin of it (wrong ids -> ghosting while the view is on, `mv_objects` 1) | binds, re-draw and restore inside `Quiet(true)` ... `Quiet(previous)` (as Tint / Probe). census_test `Phase115r` reads `census_run.h` and checks that every OMSet / PSSet / redraw() of MaskTint is inside that window |
+| B3 / A5 | the probe's `DrawKey` included the world-pass position: in VR eye 0 spent the probe budget and the flash came in one eye only | `CensusProbe::KeyPos(g_vrMode, pos)` = 0 in VR (the per-pass ordinal stays): both eyes share one verdict. census_test: the "other eye = another draw" check is now "flat: another pass", + "VR: both eyes one slot" |
+| B6 | the probe `KeyTable` was direct-mapped with eviction: ~11 % of 2000 live keys collided, evicted each other every pass and never flashed | 2-way buckets; a new key takes a free way, else the way not drawn for `kKeyKeepPasses` = 240 passes; two live keys never evict each other (a third gets no slot until one goes stale). census_test: the mutual-eviction case |
+| B2 | the VR fps-box quad's content hash (`MenuOvFpsGen`) did not include the bug strip -> missing / stale / stuck strip | + the strip's on / off and its two lines |
+| B7 | "captured this session" was set at the pair's first ARMED draw -- a capture that never started hid the pair with no report | `CapUnsave(no)` clears it on every cancel path (did not start within `kCapStartWait`, `CensusCancelCapture`, a device change) |
+| B10 / A6 | the probe's render-size stencil buffers (`g_kit[2]`, VR up to ~2 x 51 MB) lived until exit; `g_keys` across a device change | released with the masks at view off and at a device change; `g_keys` deleted at a device change (kept across a view toggle: its verdicts, 512 KB). `g_late` jobs of an old device were already dropped by `LatePoll` (device check); `cutout_mips` cannot go off live (startup only) |
+| B8 | mask words without a depth (a draw without depth write: glass, glow) showed through every later NEARER surface (cab, mirrors) | `Census::MaskMode`: a no-depth-write draw with a LESS* / GREATER* test and a linkable VS stores its depth in a TEST word (bit 31; bit 30 = "nearer is larger", reversed Z; z in [0, 1] leaves both float bits free): painted unless the final depth is nearer. `g_maskCb[kind][4]`, `PSMask*` / `PSPaint` updated. census_test: MaskShows per mode + a WARP case (a no-depth-write suspect with a later nearer draw over half of it: only the open half is painted) |
+| B9 | `MaskNow` sized the mask from the pass's first suspect draw (a smaller target first = every full-size draw skipped) | the mask has the pass's scene-depth size (`g_sceneW / H`; the draw's target size only before a scene depth is known); a draw into another size is skipped as before |
+| B11 | the paint kit held up to 8 blit-source textures until view off | a view not painted through for 600 paints is dropped |
+| B12 | a VR legend wider than the two eyes' overlap fell back to SharedDx's middle and DrawLegend clamped it per eye (double image) | shrunk to `min(0.8 W, 0.98 x LegendVr::OverlapW)` first |
+| B4 / A2 | OSGN-joined VSs went into the 64-slot hand-listed sets (a join flood silently dropped later hand-listed members); instanced draws skip the phase-80 gate, so a joined VS on a moving instanced mesh could be dithered (`pole_aa` is on in the user's ETS2 ini) | joined VSs live in their own 256-slot sets (`g_vsJoinA/B/D/F`; overflow counted: `JoinFull`, one warning); `IsSolidVs(vs, kind, &joined)`; `JoinedVsTrusted`: a joined VS only for a NOT instanced draw with a fresh static verdict (SolidOnDraw + PoleOnDraw; refusals counted in the wire stats); a full hand set's warning names the set (`SetFullNames`); each distinct joined VS logged once (up to 256, then one line). drawid_harness S114: a 300-VS join flood keeps 256, counts 44, and a hand-listed VS made after it is still in its set |
+| P5 | probe: stencil-only clear; MaskNow's TargetSize per draw; RenderBug measured with up to 24 font creations per text change at 4 Hz | depth + stencil cleared together (fast clear; the probe never tests depth); the target size cached per (pass, view); RenderBug's fitted size memoised by (scale, size, lines with digits as '0'); the bug count every 0.5 s (was 0.25) |
+
+#### Phase 115r tests
+
+cutout_mips_test 445 (+ BC1 mask scan == the per-texel reference on 169 random sizes, first-texel stop; `UploadShapeOk` / the late
+floor; HashAlpha in pieces; RealMinRatio -1 without a judged mip). census_test 599 (+ KeyPos / VR shared slot, the 2-way mutual
+eviction, MaskWord / MaskShows test modes + MaskModeOf, the WARP no-depth-write case, the MaskTint Quiet source check).
+settings_roundtrip 136381 checks from an empty folder (+ `Phase115rRules`: OverlapW + the shrunk legend fits both eyes, JoinedVsTrusted, LateStrideNext,
+LateFeedRows; WARP: the why tag survives a table collision, a 2048 x 2048 BC3 read back over several Presents at <= 2 MB each and fed,
+a stale copy dropped). drawid_harness 160376 / 160422 / 160422 (+ the S114 join flood). Every other CI test, settings_check.py, feature_check_test.py, lang
+extract --check + check, log formats (`cl /Zs /DDLAA_FMT_CHECK`) clean. Release DLL CRC32 19B064C3, 5702144 bytes.
+
+#### Not verified (nothing in the game yet)
+
+- The late read-back's real cost per Present (the stats line: "late feed max .. ms per Present") and that trees / grass the uploader
+  never saw still get their mips (now ~11 Presents later for a 4096^2 texture); the stride back-off finding new textures fast enough.
+- That `kMinArea` 512 loses no cut-out that matters (decals / small signs under 512 texels keep the game's mips unless the census is on).
+- Census: no ghosting from the mask re-draw with `mv_objects` on; both VR eyes flash together; glass / glow suspects hidden behind the
+  cab; the bug strip refreshes; the VR legend at its width.
+
+### Phase 116: fix-off objects are not coloured
+
+The user: a player with a fix switched off (Picture preset **Off**, `pole_aa` / `wire_widen` / `pixel_reader_fix` off, ...) saw
+those objects flash (phase 113 kept them tinted and added a legend line) and captured them -- but the fix is already known, so that
+wasted the player's time and filled bug reports with noise. Option 2 of the proposal:
+
+- **Not shown** (`census_run.h` Slow, the tint block): a draw whose tint kinds are ALL in `Pair::fixOff` (`Census::FixOffKinds`,
+  phase 113) is not tinted, not masked, not painted (`Census::ShownKinds(k, fixOff) == 0`); `Pair::fixOffAt` notes the Present.
+  A draw that also has a kind no fix covers is still tinted, in the colour of the kinds left (`TintKind(ShownKinds(k, fixOff))`).
+  Per draw this is one AND on the existing mask (no new allocation, no new lookup). Both VR eyes take the same per-draw kinds, so
+  both hide alike; hidden draws do not use the tint cap.
+- **Not captured**: the bug report's census part takes a pair only when `Census::CapWanted(suspect, fixOff)` (a kind no switch fixes).
+- **Bug icon** (`Census::CountBug(..., fixOffAt)`): `toCapture` counts only `CapWanted` pairs; the new `fixOff` = distinct pairs
+  hidden in the same 1 s window only because a fix is off (a pair also shown in the window counts "to capture" only; a pair captured
+  earlier this session stays "captured"). `CensusRun::g_bugFixOff` -> `CensusBugNow(.., &fixOff)` -> `CensusBugLines(.., fixOff, l3)`
+  -> a small third line **"N: fix is off"** (light grey, 2.5 px smaller) in the SAME box / VR strip size: `RenderBug` shares the
+  height among three rows and its font fit counts all three (memo key + line 3). 0 = no line. Flat `DrawBug`, the VR eye box
+  (`DrawBug(.., kStatusEyes, g_bugL3)`) and the VR fps-box strip (`SetWidgetBug(l1, l2, l3)`; `MenuOvFpsGen` hashes `g_bugL3`)
+  all get it. The count vectors at Present are static now (no allocation per count).
+- **Legend**: line 4 is "Objects with a fix that is switched off are not coloured: see Picture preset > Custom." while the fix-off
+  count is live (replaces `g_fixOffTintAt` / `kFixOffRecent`, removed). Audit S2: the line is **latched** -- `g_bugFixOff` blinks to
+  0 and back frame-to-frame as the player drives, so `CensusLegendNow` holds the line for `kLegendSecs` after the last frame the
+  count read > 0 (`g_fixOffLineUntil`), and clears it only when the census view is switched off, so it never flickers.
+- **dlaa_census.txt** still lists these pairs among the suspects, with a `fix off: <kinds> ...` line (not coloured / not counted /
+  not captured, or "the other kinds still are"), and the head line counts "N of them only because a fix is switched off". The
+  periodic LogDbg line adds "%d fix off".
+- `census_dump = 1` (dev, startup only) still dumps such a pair at first sight; its dump picture tints it (unchanged).
+- **Two startup-only edges** (audit N1 / N2). With `cutout_mips = 0` at the game start the cut-out analyser never runs, so every
+  cut-out draw keeps `cutReason = kCutOff` ("not analysed") and `FixOffKinds` reports the cut-out kind fix-off -- no cut-out flashes
+  at all until `cutout_mips` is raised and the game restarted. `pixel_reader_fix` switched ON **live** (it was off at a Custom start,
+  so `g_prFixBuild = 0`) keeps those pairs fix-off, not flashing, until a restart: the SV_Position twins that actually apply the fix
+  are built at shader creation (`g_prFixBuild`), whereas `FixOffKinds` already sees `Cover::pixelFix` (the shader *can* be twinned,
+  computed regardless of the build flag) and so treats the kind as "a fix exists, switched off".
+
+Tests: census_test 609 (+10: a pair whose kinds are all fix-off -> not tinted, not to-capture, fix-off counted, not in the capture
+list; fix-off + uncovered cut-out -> tinted in the cut-out colour, counted, captured; mixed shown / hidden in one window; the window
+edge; old callers; fix on again; captured earlier). Mutation: `ShownKinds` returning `k` (the old rule) -> 5 checks fail.
+settings_roundtrip: the legend line follows `g_bugFixOff`; flat + VR: `g_bugL3` = "4: fix is off" and empty at 0, the VR strip keeps
+its size. menu_shot: + `census-bug-fixoff.png`, `census-bug-fixoff-big.png`, `census-bug-vr-fixoff.png` (build\menu_shot_out; CI
+checks the first and the VR one); `census-legend-fixoff.png` shows the new line.
+
+Not verified in the game: the third line's legibility in the headset; that a Picture preset **Off** drive shows no flashes for
+covered objects and the right count.

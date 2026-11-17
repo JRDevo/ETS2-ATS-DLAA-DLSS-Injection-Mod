@@ -38,7 +38,11 @@
 
 namespace WaterPs {
 
-enum Rule : int { kRuleNone = 0, kRuleCheckerWrite = 1, kRuleCheckerRead = 2, kRuleFlag = 3, kRuleHash = 4 };
+enum Rule : int { kRuleNone = 0, kRuleCheckerWrite = 1, kRuleCheckerRead = 2, kRuleFlag = 3, kRuleHash = 4, kRuleVrsOnly = 5 };
+// phase 109c: kRuleVrsOnly = the OLD SCS water's G-buffer PS (river d093c12a, causeway sea 9917e274; RenderDoc 2026-11-14,
+// PHASE109_FINDINGS.md B) by checksum: VR full shading rate only (the phase-98 rule), NO overscan exemption (it has no checkerboard;
+// its depth must stay on the overscanned grid of the ground around it). inject.cpp: WaterOnDrawBegin skips it, VrsOnDraw keeps it.
+inline bool OverscanExempt(int r) { return r >= kRuleCheckerWrite && r <= kRuleHash; }
 
 inline const char* RuleName(int r) {
     switch (r) {
@@ -46,6 +50,7 @@ inline const char* RuleName(int r) {
         case kRuleCheckerRead:  return "checker reader (interpolant / w * cbuffer size -> ftou -> & 1 -> ld at that cell)";
         case kRuleFlag:         return "material flag (no inputs, constant MRT outputs with a uint id)";
         case kRuleHash:         return "known hash only (the structural rules did not match)";
+        case kRuleVrsOnly:      return "old SCS water G-buffer (phase 109c: full VRS rate only, keeps the overscan)";
         default:                return "none";
     }
 }
@@ -56,6 +61,12 @@ constexpr uint32_t kKnown[3][4] = {
     { 0xc369f136u, 0x109f6918u, 0x1886484du, 0x8c1e6edeu },   // G-buffer checker writer (EID 6611)
     { 0x185d5b7au, 0xe6cc2ba8u, 0x6bef5c09u, 0x5f5bbf0fu },   // forward water reader (EID 6876)
     { 0x4b5eb7edu, 0x0a911f92u, 0x17a9c63fu, 0xe632a5b8u },   // G-buffer material-flag draw, RT3 = (0, 0, 3, 8064) (EID 6571)
+};
+
+// phase 109c: the old SCS water's G-buffer pixel shaders (VR full rate only)
+constexpr uint32_t kVrsOnly[2][4] = {
+    { 0xd093c12au, 0xd6391e0au, 0xd8f6c7bdu, 0x1ebb1a2au },   // river G-buffer (VS 1d96d46c)
+    { 0x9917e274u, 0x3f36c497u, 0x847b46ddu, 0xdf1c060cu },   // causeway sea G-buffer (VS d11fb4ea)
 };
 
 struct Result {
@@ -331,6 +342,9 @@ inline void SumText(const uint32_t s[4], char* buf, size_t n) {
 inline Result Classify(const void* code, size_t len) {
     Result r = ClassifyImpl(code, len);
     if (r.rule == kRuleNone && r.known >= 0) r.rule = kRuleHash;
+    if (r.rule == kRuleNone)                                       // phase 109c: the old water's G-buffer, by checksum
+        for (const auto& k : kVrsOnly)
+            if (!memcmp(r.sum, k, sizeof(r.sum))) r.rule = kRuleVrsOnly;
     return r;
 }
 

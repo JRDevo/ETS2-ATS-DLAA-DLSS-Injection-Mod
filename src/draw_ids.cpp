@@ -352,6 +352,11 @@ static const uint kVoteW = kMaxDraws * 212u + 24576u;  // v0.10.0 phase 19: per 
                                             // (the phase-19 weight)
 #define kVoterA (kMaxDraws * 216u + 25600u) // per draw 72 B: the 6 probe projections a = Mp * probe (x, y, w) of a voter
 #define kMovRec (kMaxDraws * 288u + 25600u) // per mover-list entry 32 B: (draw | cabin << 31, origin x, y, w bits), (sx, sy)
+// phase 106: per draw 1 = a PAIRED origin-free SMALL world draw that ResolveDraw left at state 1 for the rigid-parent vote (a
+// view-space plate whose loose key repeated), 0 = any other draw (ResolveDraw writes every draw's word each pass). It reuses the
+// unused kMovList words (kMovList .. kParSlot = 20464 B >= kMaxDraws * 4).
+#define kOFreeS kMovList
+#define kOFreeSmallIc 512u                  // phase 106: <= this IndexCount = a plate-sized draw (plates 84 / 132; grass >= 3360)
 
 // (v0.10.0 phase 14 round 4: one more C++ raw-string split here, MSVC's 16380-byte literal cap): )" R"(
 float4x4 LoadM(ByteAddressBuffer b, uint a) {
@@ -975,6 +980,7 @@ void ResolveDraw(uint i, float4x4 R) {
     float dev = 0.0;
     uint old0;
     bool oFree = false;                                 // v0.10.0 phase 14 round 6 (OriginFree): paired, but camera-relative
+    bool oSmall = false;                                // phase 106: ... and a small world draw (listed for the parent vote)
     if ((e.z & kFInst) != 0u) state = 4u;
     else if ((e.z & kFNoMvp) != 0u || e.x == kNone) state = 5u;
     else if (NotMvp(LoadMW(CurM, i * kMStride))) state = 5u;   // v0.10.0 phase 19: rows 4..7 are not its MVP (CSPair)
@@ -988,6 +994,17 @@ void ResolveDraw(uint i, float4x4 R) {
             // never a skip streak (StatReset below), never a consensus voter (VoterLayer). Cnt [214] counts them.
             oFree = true;
             state = 2u;
+            // phase 106 (truck trailer plate ghosting, VR captures shimmer_20261114_1756xx): a SMALL world draw (IndexCount <=
+            // kOFreeSmallIc, not instanced -- instanced draws are state 4 above) that is camera-relative is a VIEW-SPACE plate
+            // (MVP = the eye's projection * eye offset: column 3 ~ (-0.029, 0, 0.200, ~0) in the dump), not grass (the game's
+            // camera-relative grass batches are 3360..19830 indices). Its loose key (ic, startIndex, baseVertex, VS) repeats when
+            // the dynamic VB offsets repeat, so it PAIRS in some frames -- and then took the static camera R here while the
+            // trailer drove (6 of 28 frames: ~0.9 px DLSS ghost). Its own pair says nothing (rotation only), exactly like an
+            // unpaired draw: state 1 + the kOFreeS mark lists it for the rigid-parent vote (ParCountable / the U list) and the
+            // plate hold, which give it its body's R (or the static pseudo-parent on world geometry). No parent = state 1 with
+            // the camera R, the same motion as before. Cabin draws keep the rule (their motion is the cabin R; not listed).
+            // FoldU.w bit 6 = HARNESS mutation: the phase-106 rule off.
+            if ((FoldU.w & 64u) == 0u && (e.z & kFCabin) == 0u && (e1.z & 0xFFFFFFu) <= kOFreeSmallIc) { state = 1u; oSmall = true; }
         } else if (paired) {
             float4x4 Mc = LoadMW(CurM, i * kMStride);
             float4x4 Mp = LoadM(PrevM, p * kMStride);
@@ -1024,8 +1041,15 @@ void ResolveDraw(uint i, float4x4 R) {
     // camera) may build a skip streak; a "static" draw with any measurable motion of its own (dev between the epsilon and the snap:
     // a vehicle driving at the player's speed -- 2026-10-09 round 3, its plate flickered with the re-check cadence) counts as
     // MOVING for the gate (it is never skipped) while its R stays the camera R as before. Cnt [210] = such shallow-static draws.
-    if (oFree) { StatReset(i); Cnt.InterlockedAdd(214u * 4u, 1u, old); }   // round 6: origin-free (static, never skipped)
-    else if (state == 2u && (e.z & kFFwd) == 0u) {
+    Work.Store(kOFreeS + i * 4u, oSmall ? 1u : 0u);    // phase 106: listed for the parent vote (ParCountable, the U list)
+    // phase 109r: the oFree / static chain must stay one if/else-if (phase 106 hung the static branch off `if (oSmall)`, which
+    // let large origin-free draws -- grass, cabin -- into the static skip bitmask / Cnt [210]). FoldU.w bit 7 = HARNESS mutation
+    // "mut109": the phase-106 bug back (a large origin-free draw also takes the static branch below).
+    if (oFree) {
+        StatReset(i); Cnt.InterlockedAdd(214u * 4u, 1u, old);   // round 6: origin-free (static, never skipped)
+        if (oSmall) Cnt.InterlockedAdd(245u * 4u, 1u, old);    //   Cnt [245] = the small ones (they are among [214] too)
+    }
+    if ((!oFree || ((FoldU.w & 128u) != 0u && !oSmall)) && state == 2u && (e.z & kFFwd) == 0u) {
         if (dev < asfloat(FoldU.z)) Cnt.InterlockedOr((384u + (i >> 5u)) * 4u, 1u << (i & 31u), old);
         else { StatReset(i); Cnt.InterlockedAdd(210u * 4u, 1u, old); }
     }
@@ -1277,7 +1301,10 @@ bool ParCountable(uint j) {
     uint4 e = Tab[j * 2u];
     if ((e.z & (kFInst | kFNoMvp)) != 0u)
         return (ParU.x & 4u) != 0u && ((e.z & kFInst) == 0u || (Tab[j * 2u + 1u].z >> 24) <= 1u || (FoldU.w & 4u) != 0u);
-    return e.x != kNone && (uint)(RTab[j * 5u + 4u].x + 0.5) == 1u && Work.Load(kPartner + j * 4u) == kNone;
+    // (phase 106: + a paired origin-free small draw ResolveDraw left at state 1, kOFreeS -- a continuity reject, also state 1
+    // with a partner, is still not listed)
+    return e.x != kNone && (uint)(RTab[j * 5u + 4u].x + 0.5) == 1u &&
+           (Work.Load(kPartner + j * 4u) == kNone || Work.Load(kOFreeS + j * 4u) != 0u);
 }
 // v0.10.0 phase 37 GROUP AGGREGATION (in game, ETS2 VR city, 336 movers: 0.51 ms avg / 0.78 ms max per eye and pass -- every grid
 // sample of one plate / truck did its 2 + 4 x 3 global atomics on the SAME kParPix / kParSum words, one serialised chain): an 8 x 8
@@ -1416,7 +1443,7 @@ void ParentListGroup(uint gi) {
         if (i < n) {
             uint4 e = Tab[i * 2u];
             if ((e.z & (kFInst | kFNoMvp)) == 0u && e.x != kNone && (uint)(RTab[i * 5u + 4u].x + 0.5) == 1u &&
-                Work.Load(kPartner + i * 4u) == kNone) isU = 1u;
+                (Work.Load(kPartner + i * 4u) == kNone || Work.Load(kOFreeS + i * 4u) != 0u)) isU = 1u;   // (phase 106: + kOFreeS)
         }
         gScan[gi] = isU;
         GroupMemoryBarrierWithGroupSync();
@@ -1429,6 +1456,7 @@ void ParentListGroup(uint gi) {
         uint slot = base + gScan[gi] - isU;
         if (isU != 0u && slot < capU) {
             Work.Store(kParSlot + i * 4u, slot); Work.Store(kParU + slot * 4u, i);
+            if (Work.Load(kOFreeS + i * 4u) != 0u) { uint o6; Cnt.InterlockedAdd(246u * 4u, 1u, o6); }   // phase 106: listed
         }
         base += gScan[255];
         GroupMemoryBarrierWithGroupSync();
@@ -1794,6 +1822,8 @@ void ParApply(uint u, uint p, uint vt) {
     if ((e.z & (kFInst | kFNoMvp)) != 0u && pst == 3u)   // v0.10.0 phase 8: ... a MOVING one (bitmask, mv_inst_replay)
         Cnt.InterlockedOr((256u + (u >> 5)) * 4u, 1u << (u & 31u), old);
     if (pst == 3u) { Cnt.InterlockedAdd(57u * 4u, 1u, old); StatReset(u); }   // (phase 14: a moving parent = it moves)
+    if (pst == 3u && Work.Load(kOFreeS + u * 4u) != 0u) Cnt.InterlockedAdd(247u * 4u, 1u, old);   // phase 106: ... of a listed
+                                                                                                  // origin-free small draw
     if (p < Counts.w) Cnt.InterlockedOr((512u + (p >> 5u)) * 4u, 1u << (p & 31u), old);   // v0.10.0 phase 14: a rigid parent
     if ((e.z & kFFwd) != 0u) Cnt.InterlockedAdd(58u * 4u, 1u, old);
     if ((vt & kChainBit) != 0u) Cnt.InterlockedAdd(59u * 4u, 1u, old);   // phase 6c: won in the 2nd pass
@@ -1872,7 +1902,18 @@ bool ParMotionOk(uint u, uint p) {
         if (hic == 0u || hic != ic || h.w * 2u < pix || pix * 2u < h.w) continue;
         float2 hc = ParUnpackC(h.y);
         float dS = length(hc - ps), dM = length(hc - pm);
-        if (dS <= kHoldPx && dS + 0.5 * length(pm - ps) < dM) atS = true;   // clearly nearer the camera prediction
+        // phase 102 (truck plates, VR test 2026-11-13): an entry whose final parent last pass was a MOVER (mapped to this pass, still
+        // moving) is the plate riding its body. Following a truck at its speed puts pm and ps only ~3 px apart, and a plate centroid on
+        // the 2 px sub-grid wobbles ~1-2 px, so such an entry landed "nearer the camera" by noise and the plate dropped to the camera
+        // R for single frames: a 2-3 px wrong MV, ~8 frames of DLSS smear (dump: id 92 GBUF ic 84, vote 1422/1422, Cnt [212]
+        // 0.54/frame, plate holds 0). Such an entry is evidence for the camera only when it is far from the parent's prediction
+        // (> kHoldPx) -- grass the vote once gave a passing car keeps being refused; grass that was static last pass still is.
+        bool wasMover = false;
+        if (h.z != kNone && h.z != kParPseudo && h.z < Counts.y) {
+            uint i2 = Work.Load(kBestPrev + h.z * 16u);
+            wasMover = i2 < Counts.w && Work.Load(kPartner + i2 * 4u) == h.z && ParState(i2) == 3u;
+        }
+        if (dS <= kHoldPx && dS + 0.5 * length(pm - ps) < dM && (!wasMover || dM > kHoldPx)) atS = true;   // clearly nearer the camera
         if (dM <= kHoldPx && dM <= dS) atM = true;
     }
     if (atS && !atM) { uint o; Cnt.InterlockedAdd(212u * 4u, 1u, o); return false; }
@@ -2256,7 +2297,8 @@ bool  g_parent = true;        // v0.10.0 phase 6: dlaa.ini mv_drawid_parent (unp
 int   g_parentMut = 0;        // v0.10.0 phase 6: harness mutations only (bit 0 conjugated formula, bit 1 no depth test; phase 14
                               // round 6: bit 2 origin-free rule off, bit 3 multi-instance draws listed / held again; round 7:
                               // bit 4 the round-6 origin-free rule; phase 19: bit 5 the MVP-shape rule off, here and in pass A;
-                              // phase 22: bit 6 the MVP layout detection off -- rows 4..7 + the phase-19 rule, as phase 21)
+                              // phase 22: bit 6 the MVP layout detection off -- rows 4..7 + the phase-19 rule, as phase 21;
+                              // phase 106: bit 7 the phase-106 rule off -- paired origin-free small draws resolved static again)
 bool  g_instancedVote = false;// v0.10.0 phase 6b: replayed instanced / no-MVP draws take part in the rigid-parent vote
                               // (dlaa.ini mv_drawid_instanced; set by DrawIdMv::SetInstanced -- in game it follows the ini key,
                               // the harness turns it on for S8 only so S1-S7 are unchanged)
@@ -3918,6 +3960,7 @@ uint64_t DrawIdRecord::ConservativeRsFull() { return g_crFull; }
 DrawIdRecord::ReplayGsFn g_replayGsFn = nullptr;
 ID3D11BlendState*        g_replayNoA2c = nullptr;      // identity only (owned by inject.cpp's forward-depth states)
 uint64_t                 g_replayGsDraws = 0;
+uint64_t                 g_replayNoA2cDraws = 0;       // phase 109b: game-widened draws re-drawn without A2C (depth batch)
 void DrawIdRecord::SetReplayGs(ReplayGsFn fn, ID3D11BlendState* noA2c) { g_replayGsFn = fn; g_replayNoA2c = noA2c; }
 
 // ---- phase 58b (perf round 2) RAW REPLAY CALLS (see SetRawCall in draw_ids.h) ----
@@ -4242,6 +4285,7 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     RawResolve(ctx, rc);
     uint64_t drawTramp = 0, drawVt = 0;                  // phase 58c: this replay's draws by path (g_rawDraw*)
     int boundGs = 0;                                     // phase 64: the widening kind whose GS is bound now
+    bool boundNoA2c = false;                             // phase 64 / 109b: the depth batch's no-A2C blend state is bound now
     bool gsTouched = false;                              //   any bind attempt this replay (-> the final unbind)
 
     // per-draw: only what differs from the previously replayed draw (first draw: everything). REVERSE draw order: the game
@@ -4377,18 +4421,23 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
         }
         // phase 64: a widened draw (its colour went through the widening GS) -> the same GS here, so its depth / id cover the band
         {
-            const int want = (forward && g_replayGsFn && s.gsKind && s.nVp) ? (int)s.gsKind : 0;
+            const bool gameWide = forward && s.gsKind == kGsNoA2c;   // phase 109b: no GS, only no A2C
+            const int want = (forward && g_replayGsFn && s.gsKind && !gameWide && s.nVp) ? (int)s.gsKind : 0;
             if (want != boundGs) {
                 const float scale = shift ? 0.5f : 1.0f;
                 const bool okGs = want ? g_replayGsFn(ctx, want, s.vp[0].Width * scale, s.vp[0].Height * scale, scale) : false;
                 if (!okGs) g_replayGsFn(ctx, 0, 0, 0, 0);    // unstamped draw, or a failed bind: never leave a previous kind's GS bound
                 gsTouched = true;
-                const int now = okGs ? want : 0;
-                if (depth && (now != 0) != (boundGs != 0))   // the band's depth on every pixel: no alpha-to-coverage for it
-                    ctx->OMSetBlendState(now && g_replayNoA2c ? g_replayNoA2c : depthBs, nullptr, 0xFFFFFFFFu);
-                boundGs = now;
+                boundGs = okGs ? want : 0;
+            }
+            // the band's depth on every pixel: no alpha-to-coverage for a widened draw (phase 64) or a game-widened one (109b)
+            const bool noA2c = depth && g_replayNoA2c && (boundGs != 0 || gameWide);
+            if (depth && noA2c != boundNoA2c) {
+                ctx->OMSetBlendState(noA2c ? g_replayNoA2c : depthBs, nullptr, 0xFFFFFFFFu);
+                boundNoA2c = noA2c;
             }
             if (boundGs) ++g_replayGsDraws;
+            if (gameWide && depth) ++g_replayNoA2cDraws;
         }
         if (depth) {                                     // v0.10.0 phase 10: the game's pixel shader + its resources
             const PsState& p = m_ps[i];
@@ -5181,6 +5230,9 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
         m_stats.parVetoes += c[212];
         m_stats.parClutter += c[213];
         m_stats.originFree += c[214];                    // round 6: origin-free paired draws resolved static
+        m_stats.originSmall += c[245];                   // phase 106: of them small world draws left for the parent vote,
+        m_stats.originSmallListed += c[246];             //   of those listed (a U slot), and the moving parents they took
+        m_stats.originSmallMover += c[247];
         m_stats.instSum += c[215];                       //   instance counts as the shaders saw them (sum, draws per count)
         for (int q = 0; q < 8; ++q) m_stats.instHist[q] += c[216 + q];
         m_stats.originDepthOnly += c[224];               // round 7: the origin-free rule's depth-only / lateral split
@@ -5327,6 +5379,9 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
                 ++m_stats.statFeeds;
                 m_stats.statShallow += c[210];           // round 3: static by the snap, but not deep (counted as moving)
                 for (uint32_t i = 0; i < nS; ++i) {
+                    // phase 109r: a draw in BOTH the static (384..) and the reset (640..) bitmask = a broken ResolveDraw chain
+                    // (only an origin-free draw is reset while state 2); always 0 in a healthy build (drawid_harness S15)
+                    if (c[384 + (i >> 5)] & c[640 + (i >> 5)] & (1u << (i & 31))) ++m_stats.statConflict;
                     const uint64_t key = keys[i];
                     if (!key) continue;                  // not a gate candidate (instanced / no MVP / cabin)
                     ++m_stats.statDraws;
@@ -5772,7 +5827,9 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         const uint32_t holdBits = ((parentOn && m_uhold[0] && m_uholdValid[1 - m_ping]) ? 1u : 0u) |
                                   ((g_parentMut & 4) ? 2u : 0u) | ((g_parentMut & 8) ? 4u : 0u) | ((g_parentMut & 16) ? 8u : 0u) |
                                   ((g_parentMut & 32) ? 16u : 0u) |  // phase 19: bit 4 = HARNESS mutation, the MVP-shape rule off
-                                  ((g_parentMut & 64) ? 32u : 0u);   // phase 22: bit 5 = HARNESS mutation, the layout detection off
+                                  ((g_parentMut & 64) ? 32u : 0u) |  // phase 22: bit 5 = HARNESS mutation, the layout detection off
+                                  ((g_parentMut & 128) ? 64u : 0u) |  // phase 106: bit 6 = HARNESS mutation, the phase-106 rule off
+                                  ((g_parentMut & 256) ? 128u : 0u);  // phase 109r: bit 7 = HARNESS mutation "mut109" (oFree chain)
         const uint32_t foldU[4] = { fold, g_parMaxListed, epsBits, holdBits };   // v0.10.0 phase 10: y = the listed-draw cap
         memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 48, clip, sizeof(clip));
         memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 64, fwdMode, sizeof(fwdMode));
@@ -6398,7 +6455,10 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         // OriginFreeCol: depth part |w| <= 0.20 m, lateral part |x|, |y| <= 0.50 clip; keep in step with kOFreeW / kOFreeXY)
         const bool ofDepth = std::fabs(o[2]) > 1e-6 && std::fabs(o[3]) <= 0.20;
         const bool ofLat = std::fabs(o[0]) <= 0.50 && std::fabs(o[1]) <= 0.50;
-        const char* ofTxt = ofDepth ? (ofLat ? "yes" : "depth only, lateral over 0.50") : "no";
+        // phase 106: paired + origin-free + a small world draw (kOFreeSmallIc 512; keep in step) at state 1 = listed for the vote
+        const bool of106 = ofDepth && ofLat && st == 1u && partner != 0xFFFFFFFFu && !cab && d.ic <= 512u;
+        const char* ofTxt = ofDepth ? (ofLat ? (of106 ? "yes (phase 106: paired small world draw, left for the rigid-parent vote)"
+                                                      : "yes") : "depth only, lateral over 0.50") : "no";
         // v0.10.0 phase 19: the MVP-shape rule of the shader (NotMvp, kShapeMin 0.02; keep in step): |row 3 .xyz| vs the longest
         // of rows 0..2
         double rl[4];

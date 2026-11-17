@@ -48,6 +48,8 @@ an in-game menu (`Delete`) and an optional text config.
 - **Mix with the game's own TAA**: blend DLAA / DLSS with TAA, or split the screen to compare.
 - Four DLSS models, switched live with a key.
 - Sharper texture text and adjustable sharpening.
+- **Choose your sharpener**: AMD RCAS or NVIDIA Image Scaling (NIS); RCAS also has a halo limit and a brightness-only option against coloured edge fringes (new in v0.17.0).
+- **Steady own shadow**: your own truck's or bus's shadow on the road no longer steps and crawls while you drive (new in v0.17.0).
 - **Motion blur** (flat, off by default): fast traffic and the world passing by get a film-like smear; your own truck stays sharp (new in v0.17.0).
 
 **Flat and VR**
@@ -70,6 +72,7 @@ an in-game menu (`Delete`) and an optional text config.
 **Menu**
 - **In-game menu** (`Delete`): every setting, its hotkey, its GPU cost, a short description.
 - **A simple menu**: plain row names, grouped most-used first, rows that cannot work in your setup hidden.
+- **Presets instead of many rows**: a **Picture preset**, **Sharpen preset**, Foveated preset and Panel preset each set a whole group with one row; the detail rows show only in Custom (new in v0.17.0).
 - Panel and fps counter can be moved and resized, flat and VR.
 - **VR panel fixed in the cab**: stays still while you look around; sharper text.
 - **FPS graph**: a small bar graph of the slowest frame over the last 2 / 5 / 10 / 30 / 60 s.
@@ -82,6 +85,7 @@ an in-game menu (`Delete`) and an optional text config.
 - Hotkeys with beeps, usable blind in a headset; every key can be re-bound.
 - Drop in a newer `nvngx_dlss.dll` any time for NVIDIA's newer models.
 - **One-press bug report**: press `Insert` twice and the mod packs the logs, settings and before/after pictures into ready-to-upload zips.
+- **Show unfixed shaders** (census): a developer tool that flashes the objects the mod does not fix yet, so flicker is easy to find and report; off by default, costs nothing when off (new in v0.17.0).
 - Debug log for bug reports (off by default).
 
 <details><summary><h3>More detail on each feature</h3></summary>
@@ -107,7 +111,7 @@ an in-game menu (`Delete`) and an optional text config.
   `Wire fix: depth`, both on; `Thicker wires (test)` is experimental and off). Far wires thinner than 1 pixel can still
   break up.
 - **Sharper far fences** — distant chain-link fences keep their wires: the mod rebuilds the small texture versions
-  the game would otherwise drop (`cutout_mips`, off by default).
+  the game would otherwise drop (`cutout_mips`, on in the Picture preset `Recommended`).
 - **Live CPU and GPU cost** — the menu shows what each part of this mod costs on the CPU and the GPU, in ms, and what
   limits your frame rate right now (CPU, GPU or the headset).
 - **Triple screens (flat)** — with the game's multi-monitor mode every screen gets its own DLAA.
@@ -197,7 +201,8 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> **Status.** The mod replaces the game's anti-aliasing with DLAA, or upscales with DLSS, on a flat screen and in VR,
+> **Status (v0.17.0-rc2, pre-release).** This test build adds a choice of sharpener (RCAS or NIS), one-switch presets, Steady own shadow, more picture fixes (truck plates, far leaves, power lines) and a developer tool to find flicker.
+> The mod replaces the game's anti-aliasing with DLAA, or upscales with DLSS, on a flat screen and in VR,
 > and can blend with the game's own TAA. Thin edges stay steady inside and outside the processed area; mirrors, traffic,
 > wires and plates are handled. The tuning menu is in all 43 game languages (AI translations, best effort, fixes welcome:
 > [Translations](#translations)). Eye-tracked foveated rendering is experimental (tested on Varjo); see the eye tracking
@@ -553,6 +558,7 @@ the value); a long low tone means "already at the limit" or "save failed". Turn 
 | `Shift+F7` / `F8` | Sharpening strength − / + 0.1. Touch it if the picture looks too soft or too crunchy |
 | `Shift+F9` / `F10` | Sharpening width − / + 0.5. Touch it together with strength, only if you changed the sharpening |
 | `Shift+F11` | DLAA on / off. Touch it to compare with and without |
+| `Ctrl+Shift+F7` | Picture preset `Recommended` ↔ `Off`: all the mod's flicker / trail / shimmer fixes off and on again at once (DLAA stays on); from `Custom` to `Off` and back to your own values. Touch it to compare: if something looks wrong only with the fixes on, report it |
 | `Ctrl+F1` / `F2` | Texture sharpness: LOD bias − / + 0.25 on the solid surfaces (road signs, dashboard, GPS), `−3`..`0`; only while DLAA / DLSS is on. Touch it if sign and dashboard text looks soft; try −0.5 to −1 |
 | `Ctrl+Shift+F1` / `F2` | Cut-out sharpness: LOD bias − / + 0.25 of the see-through draws (wire-mesh fences, grass, leaf cut-outs), `−3`..`0`. Touch it if fences moire or grass looks soft |
 | `Alt+F5` | Per-part motion vectors on / off. Touch it only to compare traffic ghosting with and without |
@@ -611,11 +617,11 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 | **CPU \| GPU ms** | What this row costs right now, in ms per frame: the CPU figure in **blue**, the GPU figure in **orange**, e.g. `0.12 \| 0.62` (`-` = that side does not apply or is not measured, `...` = still measuring, `off` = switched off, `same` / `no extra` = no extra cost). |
 
 **Categories:** the menu is in groups you open and close, most-used first. `Mode`, `Quality preset` and
-`DLAA model` are always shown. Then come the groups: `Picture` (sharpening, texture sharpness, see-through depth, light glow fix,
+`DLAA model` are always shown. Then come the groups: `Picture` (Picture preset, Sharpen preset, texture sharpness,
 DLAA area), `Motion and mirrors` (part motion, mirror DLAA, mirrors in turns), `Frame rate` (CPU tuning, AMD cache cores, FPS cap, Reflex, VR FPS
 cap), `Performance` (Turbo, foveated rendering, hidden area mask, OFXR Bridge, VectorXR), `In-game UI` (the game's own VR
 HUD / menus placement), then the `FPS counter` row with its `FPS counter` group, `Menu panel`, and `Compare and test` (DLAA off to
-compare, the game's TAA mix / split, the thin-wire switches, DLAA before tonemap -- nothing there is needed for normal driving).
+compare, the game's TAA mix / split, DLAA before tonemap -- nothing there is needed for normal driving).
 **Rows of the other mode are hidden:** flat shows no VR rows and VR shows no flat-only rows (`dlaa.ini menu_show_all = 1` shows
 everything, greyed). The panel's title line says which set you see (`VR settings` / `Flat settings`), so the
 row and group titles carry no "(VR)" / "(flat)" (`menu_show_all = 1` keeps the old titles with the mode words). In VR
@@ -676,6 +682,8 @@ The three green lines under the title show the game's GPU time per frame, what t
   `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_dist` / `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
 - **VR: the panel faces you.** Move it to the side or up / down and it turns towards your eye like a real screen,
   keeping its size from every angle (`Panel faces you` row, `menu_vr_face`, on by default; off = a flat picture).
+  **Panel preset** (VR, `panel_preset`, phase 112c): `Recommended` = depth and facing at their defaults; `Custom` shows
+  **Panel depth** and **Panel faces you** to set them yourself.
   On the garage / truck dealer screens the panel and the fps box are drawn on top of the game's own menu, not under it
   (the mod finds where the game hands each eye picture to the headset in the first frames after the menu opens).
 - **VR: rock-steady panel.** By default (`menu_vr_layer = 1`) the panel and the fps box are separate OpenXR
@@ -751,7 +759,30 @@ The three green lines under the title show the game's GPU time per frame, what t
   motion, like in films. `25 %` to `200 %` = a longer smear (`100 %` = one frame of motion). Your own truck and the cab
   stay sharp, and the game's UI is never blurred. It is a look, not a fix: it softens what DLAA made sharp. It never runs
   in VR. The last step, `200 % + pink (test)`, colours every blurred pixel pink, so you can see where it works.
-- **Thin wires** (3 rows in the same group, also on the Hotkeys page): **Wire fix: motion** (`dlaa_mv_dilate`, on,
+- **Picture preset** (`picture_preset`, `Recommended` by default; `Ctrl+Shift+F7`; was called *Picture fixes* /
+  `Standard` -- the old `picture_fixes` line and the value `standard` are still read) is one switch for all the small fixes
+  the mod adds against flicker, trails and shimmer (glass and fences, light trails, your own shadow, thin wires and poles,
+  power lines, lit edges, lit surfaces, roof shadows, the new water, the picture outside the VR DLAA area, far fences).
+  You do not need to know them:
+  - `Recommended` = every fix that has been tested is on. Leave it there. The `Glass and fence fix` follows the
+    `Quality preset` here (on with `high` / `medium`, off with `low`).
+  - `Off` = all of them off, at once, while you drive (only `Wire fix: motion` stays as it is: switching it restarts DLSS's
+    history with a short hitch, so you change it in `Custom`). Use it to compare. If something looks wrong only with `Recommended`,
+    that is a bug in one of the fixes: please report it. `Ctrl+Shift+F7` switches between `Recommended` and `Off` (a short note
+    on screen says which), so you can flick back and forth while you look at the same spot.
+  - `Custom` = for experts: the rows of the single fixes appear under it and you set each one yourself. Changing one fix
+    by hand (its row, its own hotkey, or its line in `dlaa.ini`) makes it `Custom` by itself. From `Custom`, `Ctrl+Shift+F7`
+    goes to `Off` and back to your own values.
+
+  The DLAA / DLSS itself stays on in every case (that is the `Mode` row). Test features that are off by default (`Thin pole
+  fix`, `Thicker wires`) stay off in `Recommended` until they are tested; turn them on in `Custom`. `Far fence and leaf fix`
+  is on in `Recommended`; switching it on or off works from the next game start (the textures are rebuilt while the game
+  loads them).
+- **Sharpen preset** (`sharp_preset`, `Soft` by default) comes first in the sharpening part of the Picture group and sets
+  ALL the sharpening: `Off`, `Soft`, `Balanced`, `Crisp`, `Extra crisp` (every one of them RCAS at size 1.5 px) or `Custom`.
+  Only with `Custom` do the rows **Sharpen strength**, **Sharpen type** (RCAS / NIS), **Sharpness size**, **Halo limit** and
+  **Sharpen colour** appear, right under it. Changing one of them by hand (also with the sharpen hotkeys) makes it `Custom`.
+- **Thin wires** (3 rows of the Picture preset, shown with `Custom`; also on the Hotkeys page): **Wire fix: motion** (`dlaa_mv_dilate`, on,
   `Alt+F10`) and **Wire fix: depth** (`mv_fwd_conservative`, on, `Alt+F11`) keep near telephone and power wires steady
   while you drive. Switch them off only to compare. **Thicker wires (test)** (`wire_widen`, off, `Alt+F12`) is experimental:
   it draws far wires thinner than 1 pixel as a 1-pixel line. Far wires may look darker or flicker more with it.
@@ -764,6 +795,9 @@ The three green lines under the title show the game's GPU time per frame, what t
   how big the sharp centre is, from 100 % down to 10 % in 5 % steps (`Right` = bigger). 80 % is the default (`balanced`);
   90 % = `wide`, 65 % = `narrow` (`vrs_outer` = the size, `vrs_inner` = 25 less, at least 10). On another GPU the
   row says `not supported`. Look for blocky edges at the side of your view; switch it off if they bother you.
+  **Foveated preset** (`vrs_preset`, phase 112c): `Recommended` = size, lighting and strength at their tested defaults
+  (80 %, scene, Normal); `Custom` shows the three rows below it (**Foveated size**, **Foveated: lighting too**,
+  **Foveated strength**) so you set them yourself. **Foveated eye tracking** stays visible either way.
   **Foveated: lighting too** (`vrs_passes`) picks what it acts on: `scene` (default) = the 3D world only; `scene + lighting`
   = also the game's lighting pass, at the very edge only, for more saving. Test it before you keep it: look for blocky
   light or shadow edges at the side of your view.
@@ -882,42 +916,61 @@ The table below lists the commonly used keys:
 | `mode` | *(set by `End`)* | start mode: `1` DLAA, `2` DLSS, `0` off |
 | `dlss_upscale` | `1` | `1` = allow DLSS upscaling when the render scale is below 1; `0` = DLAA only |
 | `dlss_preset` | `default` | DLSS model: `default`, `J`, `K`, `L`, `M`, `E`, `F` |
-| `sharpness` | `0.4` | sharpening after DLAA, `0`..`1` (`0` = off) |
+| `picture_preset` | `recommended` | all the mod's fixes against flicker, trails and shimmer in one switch (menu row **Picture preset**, Picture group; `key_picture_preset`, `Ctrl+Shift+F7`, switches `recommended` / `off` live): `recommended` = every tested fix on, `off` = all of them off (compare; DLAA / DLSS itself stays on; `dlaa_mv_dilate` is left as it is, phase 112r: switching it rebuilds every DLSS feature), `custom` = your own value per fix (the fix keys in this table marked "Picture preset"). Without the line: `recommended` when every fix line matches it, else `custom`. Changing one fix by hand makes it `custom`. Save writes the fix lines only with `custom`; Reset = `recommended`. Phase 112c: the old name `picture_fixes` (and `key_picture_fixes`, the value `standard`) is still read; Save writes `picture_preset` and removes `picture_fixes` |
+| `sharpness` | `0.4` | sharpening after DLAA, `0`..`2` (`0` = off; above `1` RCAS pushes harder, NIS stays at `1`) |
 | `sharp_radius` | `1.5` | sharpening width in texels, `1`..`4` |
+| `sharpen_type` | `rcas` | sharpen filter: `rcas` (AMD) or `nis` (NVIDIA Image Scaling sharpen: along edges only, fewer halos; `sharp_radius` is not used). Menu row **Sharpen type** |
+| `sharp_preset` | `soft` | all the sharpening in one choice: `off` (strength `0`), `soft` (strength `0.4`, halo `0`, colour), `balanced` (`0.8`, `0`, colour), `crisp` (`1.2`, `10`, brightness only), `extra` (`1.6`, `20`, brightness only) -- every named one with `sharpen_type = rcas` and `sharp_radius = 1.5` -- or `custom` (your own `sharpness` / `sharpen_type` / `sharp_radius` / `sharp_halo` / `sharp_luma`). Menu row **Sharpen preset**; the five value rows are shown only with Custom, and changing one by hand makes it Custom. Without the line the preset is picked from the values (else custom) |
+| `sharp_halo` | `0` | RCAS only: how far sharpening may push an edge past its neighbours (a halo = a thin light or dark line next to an edge), `0`..`50` % of their range. `0` = no halos (but little visible sharpening); `10`..`25` = crisper edges with thin halos. Menu row **Halo limit** (preset Custom) |
+| `sharp_luma` | `0` | RCAS only: `1` = sharpen brightness only (no coloured fringes on coloured edges), `0` = each colour on its own. Menu row **Sharpen colour** (preset Custom) |
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `10`..`100`. VR only: in flat mode the whole picture is always used. Also used for the truck on the VR main menu / garage screens |
-| `outside_aa` | `2` | calm the picture outside the `dlaa_area` square (so thin dark edges against the sky do not shake): `2` = steady the pixels and smooth them with FXAA (default, on), `1` = steady only, `0` = off. Works with DLAA and DLSS |
+| `outside_aa` | `2` | calm the picture outside the `dlaa_area` square (so thin dark edges against the sky do not shake): `2` = steady the pixels and smooth them with FXAA (default, on), `1` = steady only, `0` = off. Works with DLAA and DLSS. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (row **Outside the DLAA area**, VR) |
 | `mv_objects` | `2` | motion vectors for moving traffic: `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older method, for comparison) |
 | `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe  it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
 | `mirror_mv` | `parts` | motion in the mirrors (VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Smooth mirrors row sets it live, `Shift+F12` saves |
 | `mirror_turns` | `0` | mirrors in turns (VR and flat): `1` = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between (about half the mirror cost; moving things in the glass update at half rate), `0` = every mirror every frame (default). The menu's `Mirrors take turns (faster)` row switches it live, `Shift+F12` saves |
-| `dlaa_mv_dilate` | `1` | thin wires: `1` = DLSS spreads the motion data over thin lines in DLAA mode, so near wires keep their motion while driving; `0` = off (compare only). Menu row `Wire fix: motion`, `Alt+F10` |
-| `mv_fwd_conservative` | `1` | thin wires: `1` = a wire gets depth on every pixel it touches; `2` = the same without alpha-to-coverage; `0` = off (compare only). Menu row `Wire fix: depth`, `Alt+F11` |
-| `wire_widen` | `0` | thin wires, experimental: `1` = far wires thinner than 1 pixel are drawn 1 pixel wide (`wire_min_px`). Menu row `Thicker wires (test)`, `Alt+F12` |
+| `dlaa_mv_dilate` | `1` | thin wires: `1` = DLSS spreads the motion data over thin lines in DLAA mode, so near wires keep their motion while driving; `0` = off (compare only). Menu row `Wire fix: motion`, `Alt+F10`. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) |
+| `mv_fwd_conservative` | `1` | thin wires: `1` = a wire gets depth on every pixel it touches; `2` = the same without alpha-to-coverage; `0` = off (compare only). Menu row `Wire fix: depth`, `Alt+F11`. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) |
+| `wire_widen` | `0` | thin wires, experimental: `1` = far wires thinner than 1 pixel are drawn 1 pixel wide (`wire_min_px`). Menu row `Thicker wires (test)`, `Alt+F12`. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (not in `recommended` yet) |
 | `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
 | `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
 | `tex_lod_bias_auto` | `0` | `1` = while DLSS upscales, add log2(render width / output width) on top of `tex_lod_bias` (e.g. 75 % render width → −0.42) |
 | `tex_aniso` | `0` | anisotropic filtering for the world textures: `0` = the game's own setting; `2`..`16` = at least this level (trilinear textures become anisotropic) |
-| `cutout_mips` | `0` | sharper far fences: `1` = rebuild the small texture versions of alpha-tested cut-outs (chain-link fences, wire mesh) so distant wires keep their detail instead of fading away; `0` = off (default). `cutout_max_dim` (default 4096) caps the texture size it rebuilds |
+| `cutout_mips` | `1` | sharper far fences: `1` = rebuild the small texture versions of alpha-tested cut-outs (chain-link fences, wire mesh) so distant wires keep their detail instead of fading away (default since phase 112c: in `recommended`); `0` = off. `cutout_max_dim` (default 4096) caps the texture size it rebuilds. Works from the next game start. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (row **Far fence and leaf fix**; in `recommended` since phase 112c) |
+| `mv_fwd_depth` | *(Quality preset)* | the Glass and fence fix: `1` = wires, fences, glass and plates drawn without depth get their own depth for the motion vectors (no smear when you move); `0` = off. A fix of the **Picture preset** (phase 112c): its `recommended` value follows `perf_profile` (`high` / `medium` = `1`, `low` = `0`), `off` turns it off, `custom` = this line (row **Glass and fence fix**, `Ctrl+F3`). A line you write here (or the key / row) stays YOUR setting with any preset (phase 112r): the VR budget never switches it off and Save keeps it; without it, Save writes it only with `custom` |
 | `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
 | `motion_blur` | `0` | motion blur, flat only: strength in % `0`..`200` (25 % steps, `100` = one frame of motion), `0` = off (default). Fast-moving things get a smear along their own motion; your own truck, the cab and the game's UI stay sharp. Never in VR. The menu's `Motion blur` row (Motion and mirrors) |
 | `motion_blur_show` | `0` | test view for `motion_blur`: `1` = blurred pixels are tinted pink (stronger for a longer smear). The `Motion blur` row's last step (`200 % + pink (test)`) |
-| `dlss_bias_mask` | `100` | light glow ghosting fix: strength in % `0`..`100`, `0` = off. Street lamp and car light glows are told to DLSS as a mask so they leave no trail at night. Lower it (25 % steps) if glows flicker. The menu's `Light trail fix` row |
+| `shadow_lock` | `1` | `1` = your own truck's shadow on the road stops stepping while you drive (the game's sun shadow maps are not snapped to their texel grid; the mod shifts each one by a fraction of a texel and corrects the shadow lookups to match). The world's shadows may step a little instead. Menu row **Steady own shadow** (Picture; also `key_shadow_lock`, `Ctrl+Shift+F3`) switches it live. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) |
+| `shadow_lock_phase` | `0.5` | for tests: the sub-texel spot (`0`..`1`) `shadow_lock` holds the truck on |
+| `shadow_lock_diag` | `1` | `1` = find the shadow maps and write `shadow lock (phase 103)` lines to the log, also with `shadow_lock = 0`; `0` = off (no cost) |
+| `dlss_bias_mask` | `100` | light glow ghosting fix: strength in % `0`..`100`, `0` = off. Street lamp and car light glows are told to DLSS as a mask so they leave no trail at night. Lower it (25 % steps) if glows flicker. The menu's `Light trail fix` row. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) |
 | `game_taa` | `0` | only with the game's Anti-aliasing = TAA: `0` = off (the mod alone; set the game's AA to Disabled), `1` = mix (the game's TAA and DLAA / DLSS on the same raw frame, blended), `2` = split (the mod left of `game_taa_split`, TAA right of it, a thin line and labels). Without the game's TAA running, `1`..`2` act as `0`; DLAA off = the game's TAA alone. Phase 90: Mix is on the menu's `Mode` row (`Mix (TAA + DLAA)` / `Mix (TAA + DLSS)`, with `Mix amount` right under it); the split is the `Split with game TAA` row in Compare and test. Both rows (with the game's console on -- `g_developer "1"` and `g_console "1"` in config.cfg -- changing the row also switches the game's Anti-aliasing: `off` types `uset r_aa "0"`, `mix` / `split` type `uset r_aa "5"` (TAA), only when the game's value differs, flat and VR, never at startup; Reset to defaults puts `r_aa "0"` back only if the mod switched it. The game window must have the focus. The row's line shows `Game AA: TAA` / `off` and whether the switch was confirmed in game.log.txt. `r_aa` is the game's setting, never saved in dlaa.ini; the game's TAA tuning / sharpening are not touched) |
 | `game_taa_mix` | `50` | the game's TAA share of `game_taa = 1` (mix) in % `0`..`100`: more = calmer and softer, less = sharper. The menu's `Mix amount` row under Mode (10 % steps) |
 | `game_taa_split` | `50` | where the line of `game_taa = 2` (split) is, in % of the width `0`..`100` (VR: of each eye). The menu's `Split line position` row (5 % steps) |
 | `game_taa_pair` | `0` | what split compares: `0` = DLAA \| TAA (DLSS when upscaling), `1` = Mix \| TAA, `2` = DLAA \| Mix (Mix = blended at `game_taa_mix`). The menu's `Split: left | right` row |
 | `vr_ui_keys` | `0` | startup only: how the menu's `In-game UI` rows (VR) type into the game's console. `0` = real keyboard input (SendInput: the console key and Enter by scan code, the text as characters), `1` = the same with the text as scan codes on your keyboard layout, `2` = console key + Enter as DirectInput keys and the text as window characters, `3` = window messages only, `4` = DirectInput only. With `0` / `1` **the game window must have the focus on the desktop** (click it once; the row says so while it waits). Each change is confirmed by its echo in the game's `game.log.txt` (the mod's log says `CONFIRMED` / `NOT confirmed`). Needs `g_developer "1"` and `g_console "1"` in the game's config.cfg |
 | `game_taa_mvjit` | `-1` | startup only: tell DLSS the motion vectors carry the game's jitter: `-1` auto, `0` off, `1` on. Try the other value if mix / split wobbles |
-| `light_redraw_jitter` | `1` | `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). Startup only |
-| `light_fs_jitter` | `1` | `1` = the lighting pass's full-screen sunlight draw uses the same jitter shift as the G-buffer, so shadow edges on sunlit surfaces seen at a grazing angle (roofs) no longer flicker darker / lighter with the jitter; `0` = the game's viewport for it. Startup only |
-| `water_overscan_fix` | `1` | `1` = the new SCS water (Iceland and later) is drawn with the jitter shift at the game's size, so it no longer vanishes in big moving blocks; `0` = the 1 px larger jitter viewport for it too. Startup only |
+| `light_redraw_jitter` | `1` | `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (row **Lit surface fix**) |
+| `light_fs_jitter` | `1` | `1` = the lighting pass's full-screen sunlight draw uses the same jitter shift as the G-buffer, so shadow edges on sunlit surfaces seen at a grazing angle (roofs) no longer flicker darker / lighter with the jitter; `0` = the game's viewport for it. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (row **Roof shadow fix**) |
+| `water_overscan_fix` | `1` | `1` = the new SCS water (Iceland and later) is drawn with the jitter shift at the game's size, so it no longer vanishes in big moving blocks; `0` = the 1 px larger jitter viewport for it too. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (row **Water block fix**) |
+| `pixel_reader_fix` | `1` | `1` = road / water decals, lane markings, long wires and the old SCS water read the lighting of their own pixel under the jitter (before, thin lit edges changed colour from frame to frame); `0` = off. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (row **Lit edge fix**; switching it on needs a restart if the game started in `custom` with it off) |
+| `power_line_fix` | `1` | `1` = far power lines get their own depth and motion on every pixel (no smear or dashes behind them while driving); `0` = off. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (row **Power line fix**) |
+| `pole_aa` | `0` | test feature: `1` = far red / white road poles no longer break up into dashes (their thinnest faces are drawn as a faint even line of their real width). Menu row **Thin pole fix** (Picture; also `key_pole_aa`, `Ctrl+Shift+F4`) switches it live. A fix of the **Picture preset**: shown and set in `Custom`; with `Recommended` / `Off` the preset sets it (and Save removes the line) (not in `recommended` yet) |
+| `pole_min_px` | `1.0` | the width of that line in pixels (`1.0`..`4.0`; `1.5` before phase 113: a 1 px line shows a far post as steadily as the game's own picture). Startup only |
+| `census` | `0` | the shader census, a developer tool (see "Finding flicker"): `1` = on from the start = the menu row `Show unfixed shaders` (group Bug report, live, also `Ctrl+Shift+F5`): the draws likely to flicker flash (a checkerboard, phase 115) and are listed in `dlaa_census.txt`, and `Insert` twice also saves them into the bug report; `0` = off. The Save row writes it, Reset removes it |
+| `census_dump` | `0` | `1` = save each new suspect's shaders, textures and one picture in `dlaa_census\` the moment it is first seen (at most 200, one every 2 s; needs the census on); `0` = only the text file (and the bug report's census part). Startup only |
+| `census_max_mb` | `500` | disk budget of all census dumps per session (the bug report's census part too), 16..4096 MB. Startup only |
+| `key_census_view` | `Ctrl+Shift+F5` | the hotkey of **Show unfixed shaders** (the census colours on / off, live). `none` = no key (the menu row still works). See [`docs/KEYS.md`](docs/KEYS.md) |
+| `key_census_mark` | `Ctrl+Shift+F6` | the census mark key: "MARK n" with the suspects on screen into `dlaa_census.txt` + a picture. `none` = no key |
 | `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |
 | `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
 | `menu_vr_dist` | `100` | tuning menu panel, VR layer (`menu_vr_layer = 1`): the panel's distance in cm (`30`..`300`); it keeps the same size at every distance, only the stereo depth changes. The menu's `Panel depth` row sets it in 5 cm steps on the layer path (`menu_vr_depth` is the in-picture shift) |
 | `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you` row switches it live |
+| `panel_preset` | `recommended` | phase 112c, menu row **Panel preset** (VR): `recommended` = `menu_vr_depth` / `menu_vr_dist` / `menu_vr_lock_dist` / `menu_vr_face` at their defaults (12 / 100 / 80 / 1), `custom` = your own (Panel depth / Panel faces you shown). Without the line: picked from the values |
 | `menu_vr_lock` | `0` | tuning menu panel, VR layer: `0` = follows the headset, `1` = fixed in the cab at one spot in front of your seat (steady while you look around). The menu's `Panel lock` row |
 | `menu_vr_lock_x` / `menu_vr_lock_y` / `menu_vr_lock_dist` | `0` / `10` / `80` | the fixed panel's spot (`menu_vr_lock = 1`): degrees around your seat (x `-90`..`90`, + = right; y `-60`..`60`, + = down) and its distance from the seat in cm (`30`..`300`). The `Panel position X` / `Y` and `Panel depth` rows set them while the panel is fixed |
 | `menu_vr_layer` | `1` | VR : `1` = the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself: rock-steady (no swimming with the reprojection), at a real distance (panel `menu_vr_dist`, default 1 m; fps box 0.8 m), facing you with `menu_vr_face = 1`, never covered by the game's menus; `menu_vr_depth` is then unused. `0` = drawn into the eye picture as before (also the automatic fallback; `menu_vr_dist` unused) |
@@ -937,6 +990,7 @@ The table below lists the commonly used keys:
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
 | `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated: lighting too` row switches it live, `Shift+F12` saves |
 | `vrs_strength` | `0` | foveated rendering: how coarse the outer ring is. `0` = Normal (2 x 2), `1` = Strong (4 x 2), `2` = Max (4 x 4). More saving, blockier edges; best with `vrs_eye = 1`. The menu's `Foveated strength` row changes it live, `Shift+F12` saves |
+| `vrs_preset` | `recommended` | phase 112c, menu row **Foveated preset** (VR): `recommended` = `vrs_inner` / `vrs_outer` / `vrs_passes` / `vrs_strength` at their defaults (55 / 80 / 0 / 0), `custom` = your own (the three rows shown). Without the line: picked from the values |
 | `vrs_eye` | `0` | foveated rendering, **experimental**: `1` = the sharp centre follows your gaze on a headset with eye tracking (OpenXR `XR_EXT_eye_gaze_interaction`, for example Varjo); without one it stays at the lens centre. The mod asks the runtime for eye gaze at the game's start when this or `vrs` is on, so with `vrs = 1` the menu's `Foveated eye tracking` row switches it live with no restart (with `vrs = 0` at the start: restart once), `Shift+F12` saves. The log's `Eye tracking` lines show what the headset sent |
 | `vrs_eye_smooth` | `20` | eye-tracked foveation: how calmly the sharp centre follows the gaze, a time constant in ms (`0`..`100`; `0` = every gaze sample at once). A big eye jump (a saccade) is followed four times faster |
 | `vrs_eye_fake` | `0` | eye-tracked foveation, test only: `1` (with `vrs_eye = 1`) = a made-up gaze that circles slowly (about 14 degrees, one turn in 6 s) instead of the eye tracker, to check the moving sharp area on a headset without one. OpenXR eye gaze is then not requested |
@@ -1078,6 +1132,16 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   view)?** Press `Alt+F5` (or set `mv_objects = 0` in `dlaa.ini`). That turns off
   the per-object motion and leaves the camera motion only.
   Then please send the log, see *Reporting a problem*.
+
+- **Number plates on trucks and trailers ghost or garble while you follow them?** Fixed in v0.17.0: update. Plates
+  the game rebuilds each frame now take the motion of the vehicle they sit on, so they stay sharp while moving.
+
+- **Far trees thin out and sparkle, or distant fences and railings lose their detail?** Should be fixed in v0.17.0 (test build): update, and report if you still see it.
+  The fence / leaf fix (`cutout_mips`) is now in the `Recommended` Picture preset, so distant cut-out leaves and wire
+  mesh keep their small texture versions instead of fading away.
+
+- **Power lines smear or break into dashes while you drive?** Should be fixed in v0.17.0 (test build): update, and report if you still see it. Far power lines now get their
+  own depth and motion on every pixel (`power_line_fix`), so they stay solid.
 
 - **VR, coach / bus: the fps box set to "attached to the vehicle" turns with the steering wheel?** Fixed in
   v0.17.0: update. In the coaches almost no cab part could hold the box, so it held on to the steering wheel. It now
@@ -1221,7 +1285,7 @@ your values back), **Log detail**, **Rewind before key** (off / 0.5 / 1 / 2 / 3 
 graphics card all the time -- the cost column shows the memory it really holds), **Capture includes** (Quick = the above, about
 1 s; Full = + the colour / motion vectors / depth DLSS got per frame, raw motion and depth of one frame, the motion-vector view,
 moving parts off, all motion vectors off, jitter only: about 1.5 - 2 s), **Capture key** (Right opens the
-Hotkeys page), **Keep captures** (3 / 5 / 10 / all: older captures are deleted) and **Capture now**. While it captures and writes, a small status line shows at the top of the picture (in VR: in front of you);
+Hotkeys page), **Keep captures** (3 / 5 / 10 / all: older captures are deleted), **Show unfixed shaders** (a developer help, see "Finding flicker": with it on, the report also holds every suspect draw on screen) and **Capture now**. While it captures and writes, a small status line shows at the top of the picture (in VR: in front of you);
 it is never in the saved frames. Pictures are the whole picture, not cut (signs and wires sit above and beside the road).
 Size (estimates, flat 4K): Quick about 150 MB, Full with a 2 s rewind about 400 MB.
 
@@ -1268,6 +1332,66 @@ check (or edit it) before uploading.
 
 **Never attach `nvngx_dlss.dll` or any other NVIDIA DLL** — their license doesn't allow
 redistribution. Just give the version number.
+
+</details>
+
+<details>
+<summary><h2>Finding flicker: the shader census</h2></summary>
+
+While you drive, the mod can show you the game's draws it does **not** fix yet but that are likely to flicker with DLAA
+/ DLSS, and save everything a developer needs to fix them. It is a developer tool and **off by default** — no `dlaa.ini`
+editing needed:
+
+| Unfixed objects flash a checkerboard | The bug-count icon | The legend |
+|---|---|---|
+| ![Objects the mod does not fix yet flashing a checkerboard](docs/images/census-flashing.png) | ![The bug icon counting objects to capture](docs/images/census-bug-icon.png) | ![The census colour legend](docs/images/census-legend-ingame.png) |
+
+The legend in the picture reads "Colours off: **Delete**" because this player had rebound the key; the **default key is `Ctrl+Shift+F5`**.
+
+1. Open the menu (`Delete`), open **Bug report**, set **Show unfixed shaders** to **on** (or press **`Ctrl+Shift+F5`**). It
+   works at once, no restart. Every draw the mod has **no fix for yet** now **flashes** in the picture, flat and VR: a loud
+   checkerboard of its colour and black that swaps 4 times a second (phase 115: it is painted after DLAA, so DLAA cannot
+   smooth it away, and the colours are exactly the ones in the legend -- not lit or tone-mapped by the game). Each
+   colour is a different kind of problem -- you do not need to know which one, the saved capture says it. The small key at
+   the bottom of the legend: **cyan** thin (wires, posts smaller than a pixel), **orange** see-through (leaves, grass,
+   fences), **magenta** pixel (lit edges that read the wrong pixel), **blue** water, **yellow** new (a known object drawn in
+   a new way). In mirrors the old steady colour wash is used. Leaves, grass and fences the mod already handles stay uncoloured; a texture the mod has not seen loading yet is
+   read back from the graphics card and checked a moment later (phase 113), so it does not stay orange. A thin thing is
+   coloured only after the mod has measured that it really flickers -- each one is redrawn invisibly at the 8 jitter positions
+   and must lose most of its pixels between them -- so it turns cyan a second or so after it comes into view, and big
+   surfaces made of many tiny triangles (buildings, windows, far hillsides) stay uncoloured.
+
+   Objects the mod **has** a fix for, but that fix is switched off (for example `Thin pole fix` off, or Picture preset
+   **Off**), are **not** coloured: there is nothing to capture, the fix is already known. The bug icon then shows a small
+   extra line, e.g. **"2: fix is off"**, and the legend adds "Objects with a fix that is switched off are not coloured: see
+   Picture preset > Custom." An object that also has a problem no fix covers still flashes, in that problem's colour.
+   `dlaa_census.txt` still lists these objects, with a "fix off" note. The
+   legend (in plain words: what a colour means, press the capture key twice to save it, saved objects stop flashing until
+   the next game start, what the bug icon counts, how to switch the colours off -- with your own keys) shows for 15 seconds
+   every time you switch the colours on, and again while the menu sits on **Show unfixed shaders**.
+
+   While the colours are on, a small **bug icon** stays on screen: **"3 to capture"** = how many different objects flashed
+   in the last second, **"5 captured"** = how many you saved this session, and only while there are some, **"2: fix is
+   off"** = how many objects were left uncoloured because their fix is switched off. Flat it sits in a top corner away from the fps
+   box; in VR it is part of the fps box (under it, wherever you placed the box), or in front of you when the fps box is off.
+2. Drive. When you see a coloured thing flicker, press the capture key **`Insert` twice**. The bug report then also holds a
+   `census\` folder (in the `_main` zip you attach): `index.txt` (every suspect on screen right after the key, why it is one,
+   how big it was on screen), `tinted.png` (that frame, with the checkerboard) and per suspect its shaders (with disassembly),
+   textures, constant buffers, full draw state and a picture with it alone flashing. Everything the capture saved **stops
+   flashing** for the rest of this game session (it is in memory only: after the next game start it flashes again, unless
+   the mod has a fix for it by then), so what still flashes is what is left to capture; `dlaa_census.txt` lists the saved
+   ones as "captured this session". The capture's own frames stay untinted -- but the
+   **rewind** frames (Rewind before key: the moment before the key) were recorded while the colours were on, so they show
+   the tint. To get a clean rewind, turn the colours off a few seconds before the key.
+3. Turn the row off again: off costs nothing. **Save** keeps the choice (`census` in `dlaa.ini`), **Reset** turns it off.
+
+The census also keeps **`dlaa_census.txt`** next to `dlaa_inject.log` up to date while it is on (every minute and a few
+seconds after a new suspect): the whole list, sorted by how much each one matters.
+**`Ctrl+Shift+F6`** — **mark**: "MARK n" with the time and the suspects on screen goes into `dlaa_census.txt`, plus a
+picture `dlaa_census\marks\mark_NN.png`.
+
+For developers: `census_dump = 1` in `dlaa.ini` (startup only) also saves each NEW suspect the moment it is first seen, in
+`dlaa_census\<vs>_<ps>\` (at most 200, one every 2 s; `census_max_mb` = 500 MB budget for all census dumps per session).
 
 </details>
 

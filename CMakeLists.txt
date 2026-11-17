@@ -200,6 +200,22 @@ if (WITH_DLAA)
             "src/wire_widen.cpp@kSolidGs@gs_5_0@GSolidB"        # phase 63 lattice towers
             "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidA"       # phase 63 copy of G-buffer PS b67da69f + dither
             "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidB"       # phase 63 copy of G-buffer PS 34860eed + dither
+            "src/wire_widen.cpp@kSolidGs@gs_5_0@GSolidD"        # phase 107b railings + ETS2 street lights
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidC"       # phase 107b copy of G-buffer PS 57a4e1f1 (cranes) + dither
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidD"       # phase 107b copy of G-buffer PS 2d7ed0e6 (railings) + dither
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidE"       # phase 107b copy of G-buffer PS d3af2ebb (ETS2 lights) + dither
+            "src/census.h@kCensusTintPs@ps_5_0@PSMain"          # phase 108 the shader census view's tint (one colour from b13)
+            "src/census.h@kCensusTintPs@ps_5_0@PSGbuf"          # phase 109r the same for G-buffer draws (SV_Target2 = albedo)
+            "src/census.h@kCensusTintPs@ps_5_0@PSMask0"         # phase 115 the census mask word (no inputs)
+            "src/census.h@kCensusTintPs@ps_5_0@PSMask1"         # phase 115 ... SV_Position at v0 (the draw's depth)
+            "src/census.h@kCensusTintPs@ps_5_0@PSMask2"         # phase 115 ... COLOR0 v0 + SV_Position v1
+            "src/census.h@kCensusTintPs@vs_5_0@VSPaint"         # phase 115 the paint's full-screen triangle
+            "src/census.h@kCensusTintPs@ps_5_0@PSPaint"         # phase 115 the flashing checkerboard, after DLAA
+            "src/wire_widen.cpp@kSolidGs@gs_5_0@GSolidF"        # phase 109e pair F (fences + town street lights)
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidF"       # phase 109e copy of G-buffer PS 2cc0a6fa + dither
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidG"       # phase 109e copy of G-buffer PS cfc52d43 + dither
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidH"       # phase 109d copy of G-buffer PS e19e0136 (pole stripes) + dither
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidI"       # phase 111 copy of G-buffer PS 2585159b (sign atlas) + dither
             "src/menu.cpp@kMenuVs@vs_5_0@VSMain"                # v0.10.0 tuning menu panel quad
             "src/menu.cpp@kMenuPs@ps_5_0@PSMain"
             "src/menu.cpp@kMenuVs@vs_5_0@VSCab"                 # phase 47 the fps box attached to the vehicle
@@ -259,6 +275,7 @@ if (WITH_DLAA)
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/scene_dlaa.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/outside_aa.h"      # phase 81 (kOutsideAaShader)
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_blur.h"     # phase 100 (kMotionBlurShader)
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/census.h"          # phase 108 (kCensusTintPs)
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_vectors.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/preview_blit.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/hidden_mask.cpp"

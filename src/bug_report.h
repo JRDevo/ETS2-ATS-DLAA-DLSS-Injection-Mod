@@ -440,6 +440,7 @@ inline int PackPriority(const std::string& n) {
 // Each kind is packed on its own (PackParts) into shimmer_<time>_<kind>.zip, or _<kind>_part01.zip ... when it needs more.
 enum { kGroupMain = 0, kGroupFull = 1, kGroupRewind = 2, kGroupCount = 3 };
 inline int PackGroup(const std::string& n) {
+    if (!_strnicmp(n.c_str(), "census/", 7)) return kGroupMain;   // phase 110: the census part (view on at the key) -- always attached
     const int pr = PackPriority(n);
     if (pr <= 2) return kGroupMain;
     if (pr == 3 || (n.size() >= 3 && !_strnicmp(n.c_str(), "rw_", 3))) return kGroupRewind;

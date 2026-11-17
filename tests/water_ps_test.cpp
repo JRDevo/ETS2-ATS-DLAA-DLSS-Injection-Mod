@@ -160,6 +160,30 @@ static void ClassifyCases() {
             std::memcpy(v.data() + 4, WaterPs::kKnown[k], 16);
             const WaterPs::Result r = WaterPs::Classify(v.data(), v.size());
             CHECK(r.rule == WaterPs::kRuleHash && r.known == k, "hash fallback %d: rule %d known %d", k, r.rule, r.known);
+            CHECK(WaterPs::OverscanExempt(r.rule), "hash fallback %d: overscan-exempt", k);
+        }
+        // phase 109c: the old SCS water's G-buffer PSs by checksum -> VRS only (never overscan-exempt)
+        for (int k = 0; k < 2; ++k) {
+            std::memcpy(v.data() + 4, WaterPs::kVrsOnly[k], 16);
+            const WaterPs::Result r = WaterPs::Classify(v.data(), v.size());
+            CHECK(r.rule == WaterPs::kRuleVrsOnly && r.known < 0, "phase 109c VRS-only %d: rule %d known %d", k, r.rule, r.known);
+            CHECK(!WaterPs::OverscanExempt(r.rule), "phase 109c VRS-only %d must keep the overscan", k);
+        }
+        for (int rr = 1; rr <= 4; ++rr) CHECK(WaterPs::OverscanExempt(rr), "rule %d overscan-exempt", rr);
+        CHECK(!WaterPs::OverscanExempt(0), "rule 0 not exempt");
+        {   // the real bytecode (local only)
+            const char* real[2] = { "E:\\ETS2-DLAA-Injector\\captures\\phase109_2026-11-14\\ps_d093c12a.dxbc",
+                                    "E:\\ETS2-DLAA-Injector\\captures\\phase109_2026-11-14\\ps_9917e274.dxbc" };
+            for (const char* p : real) {
+                FILE* f = nullptr;
+                if (fopen_s(&f, p, "rb") || !f) { std::printf("NOTE: %s missing -- the real old-water check is skipped\n", p); continue; }
+                std::vector<uint8_t> b(1 << 16);
+                b.resize(fread(b.data(), 1, b.size(), f));
+                fclose(f);
+                const WaterPs::Result r = WaterPs::Classify(b.data(), b.size());
+                std::printf("  real %s -> %s\n", p, WaterPs::RuleName(r.rule));
+                CHECK(r.rule == WaterPs::kRuleVrsOnly, "real old water G-buffer PS: rule %d", r.rule);
+            }
         }
         char t[40];
         WaterPs::SumText(WaterPs::kKnown[0], t, sizeof(t));

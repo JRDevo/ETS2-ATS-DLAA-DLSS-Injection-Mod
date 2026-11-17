@@ -255,11 +255,13 @@ DEFAULTS = {
     "cpu_cache_pin": "0", "light_redraw_jitter": "1", "jitter_enabled": "1", "mv_enabled": "1", "tex_aniso": "0",
     "mirror_turns": "0", "reflex": "0", "fps_cap": "0", "vr_fps_cap": "0", "xr_hidden_mask": "0", "xr_turbo": "0",
     "vrs": "0", "vrs_passes": "0", "vrs_eye": "0", "fps_show": "0", "tex_lod_bias": "0",
-    "cpu_pcore": "0", "cpu_priority": "0", "cpu_no_throttle": "0", "cutout_mips": "0", "outside_aa": "2",
+    "cpu_pcore": "0", "cpu_priority": "0", "cpu_no_throttle": "0", "cutout_mips": "1", "outside_aa": "2",
 }
 
 _SKIP_STARTUP = re.compile(r"^(hotkeys:|DirectInput|controller )")
-_LIVE_KV = re.compile(r"tuning menu|settings saved to dlaa\.ini|settings RESET to defaults|^frame pace \(phase 52\)")
+# phase 112: "picture fixes now off (menu / key_picture_preset / Reset row, Present #N): dlss_bias_mask=0 ... outside_aa=0" = every
+# fix of the Picture preset (112c name; was Picture fixes) switched live (Recommended / Off / Custom, the key, Reset)
+_LIVE_KV = re.compile(r"tuning menu|settings saved to dlaa\.ini|settings RESET to defaults|^frame pace \(phase 52\)|^picture fixes now ")
 
 
 def key_timeline(sess, key, conv, extra=()):
